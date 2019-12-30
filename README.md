@@ -44,6 +44,26 @@ How is a website laid out when using spark?
     - Enable Git Gateway
     - Invite yourself and client
 
+- Adding a new component
+
+- Create new file in `./src/components`
+
+```
+import React from "react"
+
+const Button = ({ children }) => {
+  return (
+    <button className="py-4 px-4 bg-green-600">
+      {children}
+    </button>
+  )
+}
+
+export default Button
+```
+
+- Import from pages using `import Button from "../components/Button"`
+
 ## Technology
 
 - Tailwind: CSS framework that makes you a better designer.
