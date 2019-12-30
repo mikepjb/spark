@@ -54,19 +54,19 @@ echo "$(green '==>') Spark -\`*´-"
 
 platform=$(uname)
 project_name="project"
-project_directory="$pwd/$project_name"
+project_directory="$PWD/$project_name"
 
 if [ ${#@} -ne 0 ]; then
   case $* in
     *--help*) printf -- '...help...\n'; exit 0;;
     *-h*) printf -- '...help...\n'; exit 0;;
-    *new*) project_name="$2"; project_directory="$pwd/$project_name";;
+    *new*) project_name="$2"; project_directory="$PWD/$project_name";;
     *) printf -- 'nothing chosen, exiting...\n'; exit 0;;
   esac
 fi
 
-printf -- "$(blue '  ->') project name: $project_name"
-printf -- "$(blue '  ->') project directory: $project_directory"
+printf -- "$(blue '  ->') project name: $project_name\n"
+printf -- "$(blue '  ->') project directory: $project_directory\n"
 
 # }}}
 # Initial Setup {{{
