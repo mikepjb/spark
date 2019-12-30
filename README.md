@@ -89,3 +89,5 @@ export default Button
 2. spark could be a single bash script like rollout
 
 3. Include a Conventions section for things like BEM, JAMstack, component workflow etc.
+
+4. provide favicon? provide svg? unsplash?
