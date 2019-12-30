@@ -1,6 +1,6 @@
 # Spark
 
-Template for building websites
+Template for building websites that inspire you.
 
 - easy way to create demo.michaelbruce.co to show client (with robots disabled)
 - easy way to setup netlify cms to edit
@@ -114,7 +114,7 @@ export default Button
 
 3. Include a Conventions section for things like BEM, JAMstack, component workflow etc.
 
-4. provide favicon? provide svg? unsplash?
+4. provide favicon? provide svg? unsplash? fontpair.co
 
 5. Setup react-helmet? (gatsby-plugin-react-helmet)
 
