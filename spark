@@ -105,17 +105,18 @@ package_json=$(cat <<EOF
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@fullhuman/postcss-purgecss": "^1.3.0",
+    "gatsby-plugin-purgecss": "^4.0.1",
+    "gatsby-plugin-netlify": "^2.1.30",
+    "gatsby-plugin-netlify-cms": "^4.1.33",
+    "netlify-cms-app": "2.10.1",
+    "gatsby-transformer-remark": "^2.6.45",
+    "gatsby-plugin-postcss": "^2.1.18",
+    "tailwindcss": "^1.1.4",
     "autoprefixer": "^9.7.3",
     "gatsby": "^2.18.17",
     "postcss": "^7.0.25",
     "react": "^16.12.0",
     "react-dom": "^16.12.0"
-  },
-  "devDependencies": {
-    "gatsby-plugin-postcss": "^2.1.18",
-    "gatsby-plugin-purgecss": "^4.0.1",
-    "tailwindcss": "^1.1.4"
   }
 }
 EOF
@@ -142,6 +143,19 @@ module.exports = {
         tailwind: true,
       },
     },
+    {
+      resolve: "gatsby-transformer-remark",
+      options: {
+        plugins: [],
+      },
+    },
+    {
+      resolve: "gatsby-plugin-netlify-cms",
+      options: {
+        modulePath: `${__dirname}/src/cms/cms.js`,
+      },
+    },
+    "gatsby-plugin-netlify", // make sure to keep it last in the array
   ]
 }
 EOF
@@ -173,6 +187,89 @@ style_css=$(cat <<"EOF"
 EOF
 )
 write_and_save "$project_directory/src/style.css" "$style_css"
+
+netlify_config=$(cat <<"EOF"
+[build]
+  publish = "public"
+  command = "npm run build"
+EOF
+)
+write_and_save "$project_directory/netlify.toml" "$netlify_config"
+
+cms_imports=$(cat <<"EOF"
+import CMS from "netlify-cms-app"
+import HomePagePreview from "./HomePagePreview"
+CMS.registerPreviewTemplate("home", HomePagePreview)
+EOF
+)
+write_and_save "$project_directory/src/cms/cms.js" "$cms_imports"
+
+home_page_preview=$(cat <<"EOF"
+import React from "react";
+import PropTypes from "prop-types";
+
+import { HomePageTemplate } from "../pages/index";
+
+const HomePagePreview = ({ entry }) => {
+  const home = entry.getIn(["data"]).toJS();
+  return <HomePageTemplate home={home} />;
+};
+
+HomePagePreview.propTypes = {
+  entry: PropTypes.shape({
+    getIn: PropTypes.func,
+  }),
+};
+
+export default HomePagePreview;
+EOF
+)
+write_and_save "$project_directory/src/cms/HomePagePreview.js" "$home_page_preview"
+
+netlify_cms_config=$(cat <<EOF
+backend:
+  name: test-repo
+  # defaults to test-repo, used to testing netlify-cms configuration locally.
+  # name: git-gateway
+  # branch: master
+
+media_folder: static/img
+public_folder: /img
+
+display_url: https://$project_name-demo.netlify.com/
+
+collections:
+  - name: "posts"
+    label: "Posts"
+    description: "Blog posts."
+    folder: "src/pages/posts"
+    create: true
+    fields:
+      - { label: "Title", name: "title", widget: "string" }
+      - { label: "Date", name: "date", widget: "datetime" }
+      - { label: "Text", name: "text", required: true, widget: text }
+  - name: "pages"
+    label: "Pages"
+    files:
+      - file: "src/pages/home/index.md"
+        label: "Home"
+        fields:
+          - { label: "TemplateKey", name: "templateKey", widget: "hidden", default: "home-page" }
+          - {
+              label: "Hero Image",
+              name: "heroImage",
+              widget: "object",
+              fields:
+                [
+                  { label: "Image", name: "image", widget: "image" },
+                  { label: "Image Description", name: "imageAlt", widget: "string" },
+                ],
+            }
+          - { label: "Title", name: "title", widget: "string" }
+EOF
+)
+write_and_save "$project_directory/static/admin/config.yml" "$netlify_cms_config"
+
 
 # }}}
 # Final steps {{{
