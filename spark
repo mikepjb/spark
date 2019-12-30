@@ -1,0 +1,130 @@
+#!/bin/sh
+# vim: fdm=marker
+
+# TODO write your own package.json, inject git email/user as author, set MIT license?
+# TODO choose dependency versions
+# + react@16.12.0
+# + tailwindcss@1.1.4
+# + gatsby@2.18.17
+# + postcss@7.0.25
+# + react-dom@16.12.0
+# + autoprefixer@9.7.3
+# + @fullhuman/postcss-purgecss@1.3.0
+
+# Functions {{{
+
+red_code='\033[1;31m'
+green_code='\033[1;32m'
+yellow_code='\033[1;33m'
+blue_code='\033[1;34m'
+magenta_code='\033[1;35m'
+reset_code='\033[0m'
+
+function red { printf -- "$red_code$*$reset_code"; }
+function yellow { printf -- "$yellow_code$*$reset_code"; }
+function green { printf -- "$green_code$*$reset_code"; }
+function blue { printf -- "$blue_code$*$reset_code"; }
+function magenta { printf -- "$magenta_code$*$reset_code"; }
+
+function write_and_save { # write_and_save ~/.bashrc "$bashrc"
+  name=$(basename "$1")
+  echo "$(blue '  ->') checking if $1 matches..."
+  if [ -f "$1" ]; then
+    if [ "$(cat $1)" != "$2" ]; then
+      echo "$(blue '  ->') $1 does not match, backing up to ~/.config/backup/$name"
+      mkdir -p ~/.config/backup
+      mv "$1" ~/.config/backup/$name
+      echo "$(blue '  ->') writing new $1"
+      mkdir -p $(dirname "$1")
+      echo "$2" > "$1"
+    else
+      echo "$(blue '  ->') "$1" matches generated version, no action required"
+    fi
+  else
+    echo "$(blue '  ->') "$1" does not exist, writing new version"
+    echo "$2" > "$1"
+  fi
+}
+
+# }}}
+# Start {{{
+echo "$(green '==>') Spark -\`*´-"
+# }}}
+# Read Arguments & Environment {{{
+
+platform=$(uname)
+project_name="project"
+project_directory="$pwd/$project_name"
+
+if [ ${#@} -ne 0 ]; then
+  case $* in
+    *--help*) printf -- '...help...\n'; exit 0;;
+    *-h*) printf -- '...help...\n'; exit 0;;
+    *new*) project_name="$2"; project_directory="$pwd/$project_name";;
+    *) printf -- 'nothing chosen, exiting...\n'; exit 0;;
+  esac
+fi
+
+printf -- "$(blue '  ->') project name: $project_name"
+printf -- "$(blue '  ->') project directory: $project_directory"
+
+# }}}
+# Initial Setup {{{
+
+if [ -d $1 ]; then
+  print -- "$(red $project_name ' directory already exists')"
+fi
+
+mkdir "$project_directory" && cd "$project_directory"
+git init
+npm install
+
+# }}}
+# Templates {{{
+
+index_page=$(cat <<"EOF"
+import React from "react"
+export default () => <h1 class="m-5 text-center">Hello Gatsby!</h1>
+EOF
+)
+write_and_save "$project_directory/src/pages/index.js" "$gitignore"
+
+gitignore=$(cat <<"EOF"
+node_modules/
+EOF
+)
+write_and_save "$project_directory/.gitignore" "$gitignore"
+
+package_json=$(cat <<EOF
+{
+  "name": "$project_name",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@fullhuman/postcss-purgecss": "^1.3.0",
+    "autoprefixer": "^9.7.3",
+    "gatsby": "^2.18.17",
+    "postcss": "^7.0.25",
+    "react": "^16.12.0",
+    "react-dom": "^16.12.0"
+  },
+  "devDependencies": {
+    "gatsby-plugin-postcss": "^2.1.18",
+    "tailwindcss": "^1.1.4"
+  }
+}
+EOF
+)
+write_and_save "$project_directory/package.json" "$gitignore"
+
+
+# }}}
+
+printf -- "$(green '   ->') setup complete, run \`gatsby develop\` to get started\n"
