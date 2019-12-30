@@ -99,3 +99,7 @@ export default Button
 6. Setup gatsby-transformer-sharp (not at develop time to avoid android problems?)
 
 7. Setup gatsby-plugin-favicon?
+
+8. Setup new netlify app? `spark deploy?`
+
+9. include netlify-cms-media-library-cloudinary && netlify-cms-media-library-uploadcare
