@@ -120,6 +120,6 @@ write_and_save "$project_directory/package.json" "$package_json"
 # }}}
 # Final steps {{{
 npm install # source dependencies
-git add -all && git commit -m "Created $project_name" # commit completed setup
+git add --all && git commit -m "Created $project_name" # commit completed setup
 # }}}
 printf -- "$(green '   ->') setup complete, run \`gatsby develop\` to get started\n"
