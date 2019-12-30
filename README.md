@@ -63,6 +63,8 @@ export default Button
 ```
 
 - Import from pages using `import Button from "../components/Button"`
+- Use inside the page with `<Button>Click me!</Button>`
+- Other parameters can be named/passed in as tag attrs (children is special)
 
 ## Technology
 
