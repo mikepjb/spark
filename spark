@@ -3,6 +3,8 @@
 
 # TODO write your own package.json, inject git email/user as author, set MIT license?
 # TODO a bit more verbosity to describe what's going on (spark needs better UX)
+# TODO check gatsby-cli is available..
+# TODO check gatsby-cli version too..
 
 # Functions {{{
 
@@ -94,6 +96,7 @@ package_json=$(cat <<EOF
   "description": "",
   "main": "index.js",
   "scripts": {
+    "build": "gatsby build",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -116,6 +119,49 @@ EOF
 )
 write_and_save "$project_directory/package.json" "$package_json"
 
+gatsby_config=$(cat <<"EOF"
+module.exports = {
+  plugins: [
+    {
+      resolve: `gatsby-plugin-postcss`,
+      options: {
+        postCssPlugins: [
+          require("tailwindcss"),
+          require("autoprefixer"),
+        ]
+      },
+    }
+  ]
+}
+EOF
+)
+write_and_save "$project_directory/gatsby-config.js" "$gatsby_config"
+
+gatsby_browser=$(cat <<"EOF"
+import "./src/style.css"
+EOF
+)
+write_and_save "$project_directory/gatsby-browser.js" "$gatsby_browser"
+
+tailwind_config=$(cat <<"EOF"
+module.exports = {
+  theme: {
+    extend: {}
+  },
+  variants: {},
+  plugins: []
+}
+EOF
+)
+write_and_save "$project_directory/tailwind.config.js" "$tailwind_config"
+
+style_css=$(cat <<"EOF"
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+EOF
+)
+write_and_save "$project_directory/src/style.css" "$style_css"
 
 # }}}
 # Final steps {{{
