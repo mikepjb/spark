@@ -25,6 +25,8 @@ How is a website laid out when using spark?
     will be pages with fields that can be edited).
 - public/img/
   - An folder that NetlifyCMS commits images to on behalf of an administrator.
+- static
+  - Gatsby by convention will copy everything from /static into the /public build target
 
 ## Common Actions
 
