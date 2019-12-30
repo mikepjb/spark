@@ -91,3 +91,9 @@ export default Button
 3. Include a Conventions section for things like BEM, JAMstack, component workflow etc.
 
 4. provide favicon? provide svg? unsplash?
+
+5. Setup react-helmet? (gatsby-plugin-react-helmet)
+
+6. Setup gatsby-transformer-sharp (not at develop time to avoid android problems?)
+
+7. Setup gatsby-plugin-favicon?
