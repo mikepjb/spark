@@ -9,6 +9,11 @@ Template for building websites
 - email mailing list/marketing? drip? mailchimp?
 - user tracking -> panel to view stats? google analytics?
 
+## TODO
+
+- preview does not have tailwind.
+- preview is not picking up values for index page in demo mode. (may be a demo thing..)
+
 ## Getting Started
 
 - install nvm (a version manager to select specific versions of node/npm).
@@ -27,6 +32,14 @@ How is a website laid out when using spark?
   - An folder that NetlifyCMS commits images to on behalf of an administrator.
 - static
   - Gatsby by convention will copy everything from /static into the /public build target
+- markdown files in pages:
+  - gatsby-transformer-remark as frontmatter and graphql makes the data available.
+- gatsby-node.js
+  - runs actions during develop/build: primarily used to build dynamic pages with createPages.
+- src/pages
+  - either js or md files - pages for the website, md are made from templates
+- src/templates
+  - template pages
 
 ## Common Actions
 
@@ -77,6 +90,15 @@ export default Button
 - Netlify CMS: static CMS tool that allows non-tech users to edit static sites.
 - NVM (node version manager, uses .nvmrc to provide compatible version)
 
+## Technology Information
+
+- propTypes are inbuilt type checking for React (gatsby-netlify-cms uses them)
+- graphql queries return to 'data' variable - not sure const name means anything to them.
+- gatsby has plugins for graphql to hook into e.g gatsby-source-filesystem.
+- const { frontmatter: home } = data.allMarkdownRemark.edges[0].node;
+  - this means pull out frontmatter attr and name it home.
+- Gatsby doesn't work too well with markdown inside src/pages (hot reload is flaky)
+
 ## Static Site Gens compared
 
 - Gatsby is used on React website (well supported)
@@ -103,3 +125,7 @@ export default Button
 8. Setup new netlify app? `spark deploy?`
 
 9. include netlify-cms-media-library-cloudinary && netlify-cms-media-library-uploadcare
+
+## References
+
+https://github.com/robertcoopercode/gatsby-netlify-cms

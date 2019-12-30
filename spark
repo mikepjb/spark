@@ -72,6 +72,7 @@ if [ -d $1 ]; then
 fi
 
 mkdir "$project_directory" && cd "$project_directory"
+mkdir -p static/img # init folder where Netlify CMS will store media. 
 git init
 
 # }}}
@@ -79,10 +80,104 @@ git init
 
 index_page=$(cat <<"EOF"
 import React from "react"
-export default () => <h1 class="m-5 text-center">Hello Gatsby!</h1>
+import { graphql } from "gatsby";
+
+export const HomePageTemplate = ({ home }) => {
+  return (
+    <h1 class="m-5 text-center">{home.message}</h1>
+  )
+}
+
+class HomePage extends React.Component {
+  render() {
+    const { data } = this.props;
+    const { frontmatter: home } = data.allMarkdownRemark.edges[0].node;
+    return (
+      <HomePageTemplate home={home} />
+    )
+  }
+}
+
+export default HomePage
+
+export const query = graphql`
+  query HomePageQuery {
+    allMarkdownRemark(filter: {frontmatter: {type: {eq: "index"}}}) {
+      edges {
+        node {
+          id
+          frontmatter {
+            title
+            path
+            date
+            message
+          }
+        }
+      }
+    }
+  }
+`
 EOF
 )
 write_and_save "$project_directory/src/pages/index.js" "$index_page"
+
+index_info=$(cat <<"EOF"
+---
+type: index
+path: "/"
+title: "Index Page Title"
+message: "Hello from index frontmatter!"
+---
+EOF
+)
+write_and_save "$project_directory/src/content/index.md" "$index_info"
+
+post_page=$(cat <<"EOF"
+import React from "react"
+import { graphql } from "gatsby"
+export default function Template({
+  data, // this prop will be injected by the GraphQL query below.
+}) {
+  const { markdownRemark } = data // data.markdownRemark holds your post data
+  const { frontmatter, html } = markdownRemark
+  return (
+    <div className="blog-post-container">
+      <div className="blog-post">
+        <h1>{frontmatter.title}</h1>
+        <h2>{frontmatter.date}</h2>
+        <div
+          className="blog-post-content"
+          dangerouslySetInnerHTML={{ __html: html }}
+        />
+      </div>
+    </div>
+  )
+}
+export const pageQuery = graphql`
+  query($path: String!) {
+    markdownRemark(frontmatter: { path: { eq: $path } }) {
+      html
+      frontmatter {
+        date(formatString: "MMMM DD, YYYY")
+        path
+        title
+      }
+    }
+  }
+`
+EOF
+)
+write_and_save "$project_directory/src/templates/post.js" "$post_page"
+
+demo_post=$(cat <<"EOF"
+---
+path: "/demo-post"
+date: "2019-05-04"
+title: "A demo post."
+---
+EOF
+)
+write_and_save "$project_directory/src/content/posts/demo-post.md" "$demo_post"
 
 gitignore=$(cat <<"EOF"
 node_modules/
@@ -111,6 +206,7 @@ package_json=$(cat <<EOF
     "netlify-cms-app": "2.10.1",
     "gatsby-transformer-remark": "^2.6.45",
     "gatsby-plugin-postcss": "^2.1.18",
+    "gatsby-source-filesystem": "^2.1.43",
     "tailwindcss": "^1.1.4",
     "autoprefixer": "^9.7.3",
     "gatsby": "^2.18.17",
@@ -126,6 +222,21 @@ write_and_save "$project_directory/package.json" "$package_json"
 gatsby_config=$(cat <<"EOF"
 module.exports = {
   plugins: [
+    {
+      // keep as first gatsby-source-filesystem plugin for gatsby image support
+      resolve: 'gatsby-source-filesystem',
+      options: {
+        path: `${__dirname}/static/img`,
+        name: 'uploads',
+      },
+    },
+    {
+      resolve: 'gatsby-source-filesystem',
+      options: {
+        path: `${__dirname}/src/content`,
+        name: 'pages',
+      },
+    },
     {
       resolve: `gatsby-plugin-postcss`,
       options: {
@@ -161,6 +272,45 @@ module.exports = {
 EOF
 )
 write_and_save "$project_directory/gatsby-config.js" "$gatsby_config"
+
+gatsby_node=$(cat <<"EOF"
+const path = require(`path`)
+exports.createPages = async ({ actions, graphql, reporter }) => {
+  const { createPage } = actions
+  const postTemplate = path.resolve(`src/templates/post.js`)
+  const result = await graphql(`
+    {
+      allMarkdownRemark(
+        filter: {frontmatter: {type: {eq: null}}}
+        sort: { order: DESC, fields: [frontmatter___date] }
+        limit: 1000
+      ) {
+        edges {
+          node {
+            frontmatter {
+              path
+            }
+          }
+        }
+      }
+    }
+  `)
+  // Handle errors
+  if (result.errors) {
+    reporter.panicOnBuild(`Error while running GraphQL query.`)
+    return
+  }
+  result.data.allMarkdownRemark.edges.forEach(({ node }) => {
+    createPage({
+      path: node.frontmatter.path,
+      component: postTemplate,
+      context: {}, // additional data can be passed via context
+    })
+  })
+}
+EOF
+)
+write_and_save "$project_directory/gatsby-node.js" "$gatsby_node"
 
 gatsby_browser=$(cat <<"EOF"
 import "./src/style.css"
@@ -242,7 +392,7 @@ collections:
   - name: "posts"
     label: "Posts"
     description: "Blog posts."
-    folder: "src/pages/posts"
+    folder: "src/content/posts"
     create: true
     fields:
       - { label: "Title", name: "title", widget: "string" }
@@ -251,7 +401,8 @@ collections:
   - name: "pages"
     label: "Pages"
     files:
-      - file: "src/pages/home/index.md"
+      - file: "src/content/index.md"
+        name: "home"
         label: "Home"
         fields:
           - { label: "TemplateKey", name: "templateKey", widget: "hidden", default: "home-page" }
