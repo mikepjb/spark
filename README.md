@@ -43,7 +43,7 @@ How is a website laid out when using spark?
 
 ## Common Actions
 
-- Building a new CMS-editable page
+### Building a new CMS-editable page
   - Requires a new src/cms/preview-templates/<name>.js
     - import navbar/page/component
     - assign proptypes? (whatever that is..)
@@ -59,7 +59,7 @@ How is a website laid out when using spark?
     - Enable Git Gateway
     - Invite yourself and client
 
-- Adding a new component
+### Adding a new component
 
 - Create new file in `./src/components`
 
@@ -80,6 +80,12 @@ export default Button
 - Import from pages using `import Button from "../components/Button"`
 - Use inside the page with `<Button>Click me!</Button>`
 - Other parameters can be named/passed in as tag attrs (children is special)
+
+### Including a font (from Google Fonts or Fontsquirrel):
+
+- Get inspired first with fontpair.co/typography.js to see something that looks good.
+- `npm install typeface-open-sans --save`
+- include `require('type-open-sans')` in `gatsby-browser.js`
 
 ## Technology
 
