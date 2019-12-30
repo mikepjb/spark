@@ -5,6 +5,7 @@
 # TODO a bit more verbosity to describe what's going on (spark needs better UX)
 # TODO check gatsby-cli is available..
 # TODO check gatsby-cli version too..
+# TODO create tailwind-sandbox? naked tailwind only no framework etc.. with live-server etc
 
 # Functions {{{
 
@@ -96,6 +97,7 @@ package_json=$(cat <<EOF
   "description": "",
   "main": "index.js",
   "scripts": {
+    "dev": "gatsby develop",
     "build": "gatsby build",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
@@ -112,6 +114,7 @@ package_json=$(cat <<EOF
   },
   "devDependencies": {
     "gatsby-plugin-postcss": "^2.1.18",
+    "gatsby-plugin-purgecss": "^4.0.1",
     "tailwindcss": "^1.1.4"
   }
 }
@@ -130,7 +133,15 @@ module.exports = {
           require("autoprefixer"),
         ]
       },
-    }
+    },
+    {
+      resolve: `gatsby-plugin-purgecss`,
+      options: {
+        printRejected: false,
+        develop: false,
+        tailwind: true,
+      },
+    },
   ]
 }
 EOF
