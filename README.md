@@ -114,7 +114,7 @@ export default Button
 
 3. Include a Conventions section for things like BEM, JAMstack, component workflow etc.
 
-4. provide favicon? provide svg? unsplash? fontpair.co
+4. provide favicon? provide svg? unsplash? fontpair.co? typography.js
 
 5. Setup react-helmet? (gatsby-plugin-react-helmet)
 
