@@ -181,6 +181,8 @@ write_and_save "$project_directory/src/content/posts/demo-post.md" "$demo_post"
 
 gitignore=$(cat <<"EOF"
 node_modules/
+.cache/
+public/
 EOF
 )
 write_and_save "$project_directory/.gitignore" "$gitignore"
