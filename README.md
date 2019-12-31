@@ -87,6 +87,10 @@ export default Button
 - `npm install typeface-open-sans --save`
 - include `require('type-open-sans')` in `gatsby-browser.js`
 
+### Including a class on document body
+
+- Invoke this on the page render function: `document.body.classList.add('bg-gray-100')`
+
 ## Technology
 
 - Tailwind: CSS framework that makes you a better designer.
