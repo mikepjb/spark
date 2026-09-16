@@ -1,29 +1,73 @@
 # Spark
 
-Spark is a lightweight agent harness, designed to only have read-only tool
-calls.
+Spark is a lightweight agent harness for software analysis. It is designed to
+keep people in the loop and to expose only tightly controlled, read-only tools.
+The initial target is a small local model such as a quantized Qwen 2B or 4B,
+running comfortably on a consumer laptop.
 
-This is for two reasons:
-    - Human Context: Software engineers NEED to remain in the loop of the
-      output, for that there is no better solution than actually doing this
-      work. LLMs are very good at analysis and actually making changes however,
-      if enough changes are made to a system that no one understands it anymore,
-      it becomes increasingly difficult to know what to ask or how to direct
-      said LLM.
-    - Improved security, if the LLM does not have the ability to compromise the
-      system then that's great.
+## Approach
 
-Mainly, spark is intended to be used with a lightweight (targetting Qwen 3.5 2B
-or 4B Q5) LLM. It's a tradeoff where we want this to run locally on consumer
-laptops (DDR5+ iGPU/CPU based) while still being capable enough to run analysis
-as required.
+Spark will be a local TUI and agent coordinator that connects to an externally
+managed LLM server:
 
-I'm already aware that both 2B and 4B struggle with questions around libraries
-in Clojure, so YMMV but we are targetting:
+```text
+TUI -> agent coordinator -> OpenAI-compatible model API
+                       -> structured read-only tools
+                       -> SQLite sessions and event log
+```
 
-- Golang
+The LLM server, such as [llama.cpp](https://github.com/ggml-org/llama.cpp), is
+not managed by Spark. Spark only reads its connection configuration. Model
+output is streamed, accumulated as an event history, and rendered as Markdown
+while it arrives.
+
+Tools execute automatically, but they are capabilities rather than arbitrary
+shell commands. Git operations will be exposed through a dedicated allowlisted
+tool. Other useful analysis operations, such as filtering or extracting lines,
+will be implemented directly rather than by exposing `bash`, `awk`, or a
+generic command runner.
+
+## Technology choices
+
+- Go for a small, portable single-binary application.
+- [Bubble Tea](https://github.com/charmbracelet/bubbletea) and
+  [Bubbles](https://github.com/charmbracelet/bubbles) for the event-driven TUI.
+- [Lip Gloss](https://github.com/charmbracelet/lipgloss) for terminal layout
+  and styling.
+- The OpenAI-compatible Chat Completions API for compatibility with both
+  OpenAI and llama.cpp.
+- [SQLite](https://www.sqlite.org/) for durable sessions, streamed events,
+  tool calls, and run history.
+- [Glamour](https://github.com/charmbracelet/glamour), backed by
+  [Goldmark](https://github.com/yuin/goldmark) and
+  [Chroma](https://github.com/alecthomas/chroma), for terminal Markdown and
+  code rendering.
+- YAML configuration in `.spark.yaml` and `~/.config/spark/config.yaml`.
+  Secrets should come from environment variables rather than project files.
+
+## Initial scope
+
+The first tools are expected to cover bounded filesystem inspection and safe
+Git operations such as status, diff, log, and show. Every tool will enforce
+workspace boundaries, argument validation, output limits, and timeouts.
+
+Spark will not initially provide:
+
+- saving/exporting output to disk, though when a plan is generated or something
+  that you want to review later this would be handy!
+- skills, though this needs to come soon as grill-me is great!
+- arbitrary shell or code execution;
+- file writes, edits, or deletes;
+- management or downloading of LLM servers/models;
+- embeddings, RAG, or MCP integration.
+
+The repository is currently a project scaffold; the architecture above
+describes the intended direction rather than implemented functionality.
+
+## Target languages
+
+- Go
 - Java
 - Python
-- Typescript
-- Javascript
-- Bash
+- TypeScript / JavaScript
+- Bash (analysis of scripts, not execution)
