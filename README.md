@@ -5,6 +5,13 @@ keep people in the loop and to expose only tightly controlled, read-only tools.
 The initial target is a small local model such as a quantized Qwen 2B or 4B,
 running comfortably on a consumer laptop.
 
+## How this might be useful
+
+- Rather than running any command in bash, if this is necessary, the model can
+  still prompt the user to enter the command. People can still copy and paste
+  but there is at least some level of exposure and learning that you won't get
+  with a fully autonomous agent.
+
 ## Approach
 
 Spark will be a local TUI and agent coordinator that connects to an externally

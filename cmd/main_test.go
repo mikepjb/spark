@@ -1,0 +1,201 @@
+package main
+
+import (
+	"strings"
+	"testing"
+
+	tea "charm.land/bubbletea/v2"
+)
+
+func press(name string) tea.KeyPressMsg {
+	switch name {
+	case "enter":
+		return tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter})
+	case "esc":
+		return tea.KeyPressMsg(tea.Key{Code: tea.KeyEsc})
+	case "pgup":
+		return tea.KeyPressMsg(tea.Key{Code: tea.KeyPgUp})
+	case "pgdown":
+		return tea.KeyPressMsg(tea.Key{Code: tea.KeyPgDown})
+	case "ctrl+j":
+		return tea.KeyPressMsg(tea.Key{Code: 'j', Mod: tea.ModCtrl})
+	case "ctrl+,":
+		return tea.KeyPressMsg(tea.Key{Code: ',', Mod: tea.ModCtrl})
+	case "ctrl+c":
+		return tea.KeyPressMsg(tea.Key{Code: 'c', Mod: tea.ModCtrl})
+	case "?":
+		return tea.KeyPressMsg(tea.Key{Code: '?', Text: "?"})
+	default:
+		return tea.KeyPressMsg(tea.Key{Code: rune(name[0]), Text: name[:1]})
+	}
+}
+
+func updateModel(t *testing.T, m model, msg tea.Msg) (model, tea.Cmd) {
+	t.Helper()
+	updated, cmd := m.Update(msg)
+	return updated.(model), cmd
+}
+
+func TestInitialModelConfiguresMultilineInput(t *testing.T) {
+	m := initialModel()
+
+	if !m.input.DynamicHeight {
+		t.Fatal("expected dynamic textarea height")
+	}
+	if m.input.MinHeight != 1 || m.input.MaxHeight != maxInputHeight {
+		t.Fatalf("unexpected textarea height bounds: %d-%d", m.input.MinHeight, m.input.MaxHeight)
+	}
+	if m.input.ShowLineNumbers {
+		t.Fatal("expected textarea line numbers to be disabled")
+	}
+	if !m.input.KeyMap.InsertNewline.Enabled() {
+		t.Fatal("expected newline binding to be enabled")
+	}
+	if got := m.input.KeyMap.InsertNewline.Keys(); len(got) != 1 || got[0] != "ctrl+j" {
+		t.Fatalf("unexpected newline keys: %v", got)
+	}
+}
+
+func TestInputNewlineAndSubmit(t *testing.T) {
+	m := initialModel()
+	m.resize(60, 20)
+	m.input.SetValue("first line")
+
+	m, _ = updateModel(t, m, press("ctrl+j"))
+	if got := m.input.Value(); got != "first line\n" {
+		t.Fatalf("newline was not inserted, got %q", got)
+	}
+	if m.input.Height() != 2 {
+		t.Fatalf("expected textarea to grow to two rows, got %d", m.input.Height())
+	}
+
+	m.input.InsertString("second line")
+	m, _ = updateModel(t, m, press("enter"))
+	if got := len(m.history); got != 2 {
+		t.Fatalf("expected submitted message in history, got %d messages", got)
+	}
+	if got := m.history[1].content; got != "first line\nsecond line" {
+		t.Fatalf("unexpected submitted content: %q", got)
+	}
+	if got := m.input.Value(); got != "" {
+		t.Fatalf("expected input to reset, got %q", got)
+	}
+	if m.input.Height() != 1 {
+		t.Fatalf("expected textarea to shrink after submit, got %d", m.input.Height())
+	}
+}
+
+func TestQuestionMarkIsHelpOnlyForEmptyInput(t *testing.T) {
+	m := initialModel()
+	m.resize(60, 20)
+
+	m, _ = updateModel(t, m, press("?"))
+	if !m.showHelp || m.input.Focused() {
+		t.Fatal("expected help to open and input to blur")
+	}
+	if view := m.View().Content; !strings.Contains(view, "ctrl+,") || !strings.Contains(view, "settings") {
+		t.Fatalf("expanded help did not include settings binding: %q", view)
+	}
+
+	m, _ = updateModel(t, m, press("esc"))
+	if m.showHelp || !m.input.Focused() {
+		t.Fatal("expected help to close and input to refocus")
+	}
+
+	m.input.SetValue("question")
+	m, _ = updateModel(t, m, press("?"))
+	if m.showHelp {
+		t.Fatal("question mark opened help while composing a message")
+	}
+	if got := m.input.Value(); got != "question?" {
+		t.Fatalf("question mark was not inserted into input: %q", got)
+	}
+}
+
+func TestSettingsOverlay(t *testing.T) {
+	m := initialModel()
+	m.resize(60, 20)
+
+	m, _ = updateModel(t, m, press("ctrl+,"))
+	if !m.showSettings || m.input.Focused() {
+		t.Fatal("expected settings overlay to open and input to blur")
+	}
+	if view := m.View().Content; !strings.Contains(view, "Settings") {
+		t.Fatalf("settings view did not contain its title: %q", view)
+	}
+
+	m, _ = updateModel(t, m, press("esc"))
+	if m.showSettings || !m.input.Focused() {
+		t.Fatal("expected settings overlay to close and input to refocus")
+	}
+}
+
+func TestQuitBlursRealCursor(t *testing.T) {
+	m := initialModel()
+	if !m.input.Focused() {
+		t.Fatal("expected input to start focused")
+	}
+
+	updated, cmd := updateModel(t, m, press("ctrl+c"))
+	if cmd == nil {
+		t.Fatal("expected quit command")
+	}
+	if updated.input.Focused() || updated.View().Cursor != nil {
+		t.Fatal("expected quit to remove the real cursor from the final view")
+	}
+}
+
+func TestHistoryScrollsWithViewport(t *testing.T) {
+	m := initialModel()
+	for i := 0; i < 20; i++ {
+		m.history = append(m.history, chatMessage{role: roleAssistant, content: "history line"})
+	}
+	m.resize(40, 8)
+
+	if !m.viewport.AtBottom() {
+		t.Fatal("expected history to start at the bottom")
+	}
+	m, _ = updateModel(t, m, press("pgup"))
+	if m.viewport.AtBottom() {
+		t.Fatal("expected page up to scroll history")
+	}
+	m, _ = updateModel(t, m, press("pgdown"))
+	if !m.viewport.AtBottom() {
+		t.Fatal("expected page down to return to the bottom")
+	}
+}
+
+func TestHistoryKeepsRoleColorsWithoutVisiblePrefixes(t *testing.T) {
+	m := initialModel()
+	m.history = []chatMessage{
+		{role: roleAssistant, content: "welcome"},
+		{role: roleUser, content: "hello"},
+	}
+	m.resize(40, 10)
+
+	content := m.viewport.GetContent()
+	if strings.Contains(content, "assistant:") || strings.Contains(content, "you:") {
+		t.Fatalf("history still contains role prefixes: %q", content)
+	}
+	if !strings.Contains(content, "welcome") || !strings.Contains(content, "hello") {
+		t.Fatalf("history content was not rendered: %q", content)
+	}
+}
+
+func TestStatusShowsBusySpinnerAndContext(t *testing.T) {
+	m := initialModel()
+	m.busy = true
+	m.contextUsed = 128
+	m.contextLimit = 4096
+
+	status := m.statusView()
+	for _, expected := range []string{"model: not connected", "context: 128/4096", "thinking"} {
+		if !strings.Contains(status, expected) {
+			t.Fatalf("status %q did not contain %q", status, expected)
+		}
+	}
+
+	if _, cmd := updateModel(t, m, m.spinner.Tick()); cmd == nil {
+		t.Fatal("expected busy spinner to schedule its next tick")
+	}
+}
