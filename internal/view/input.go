@@ -7,6 +7,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
+// handleKeyPress handles key presses in the 'default' UI state of spark i.e
+// when no modals are showing etc.
 func (m *model) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if key.Matches(msg, m.keys.Close) {
 		m.input.Reset()
