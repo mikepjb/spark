@@ -1,0 +1,148 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "Read",
+      "description": "Read a bounded section of a text file within the workspace.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "filePath": {
+            "type": "string",
+            "description": "Workspace-relative or absolute file path."
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "1-indexed line to start at; defaults to 1."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Maximum number of lines to return; defaults to 500."
+          }
+        },
+        "required": ["filePath"],
+        "additionalProperties": false
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "Glob",
+      "description": "Find workspace files matching a glob pattern.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "pattern": {
+            "type": "string",
+            "description": "Workspace-relative glob pattern, such as src/**/*.go."
+          }
+        },
+        "required": ["pattern"],
+        "additionalProperties": false
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "Grep",
+      "description": "Search workspace text files with a regular expression.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "pattern": {
+            "type": "string",
+            "description": "Regular expression to search for."
+          },
+          "files": {
+            "type": "string",
+            "description": "Workspace-relative file glob, such as **/*.go."
+          }
+        },
+        "required": ["pattern", "files"],
+        "additionalProperties": false
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "GitStatus",
+      "description": "Show the workspace Git branch and short working-tree status.",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "GitDiff",
+      "description": "Show a bounded read-only Git diff for the workspace.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "staged": {
+            "type": "boolean",
+            "description": "Show the staged diff instead of the working-tree diff."
+          },
+          "path": {
+            "type": "string",
+            "description": "Optional workspace-relative path filter."
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "GitLog",
+      "description": "Show recent one-line Git history, optionally limited to a path.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Optional workspace-relative path filter."
+          },
+          "maxCount": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "description": "Maximum commits to return; defaults to 20."
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "GitShow",
+      "description": "Show a Git revision, optionally limited to a workspace path.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "revision": {
+            "type": "string",
+            "description": "Git revision, such as HEAD or a commit hash."
+          },
+          "path": {
+            "type": "string",
+            "description": "Optional workspace-relative path filter."
+          }
+        },
+        "required": ["revision"],
+        "additionalProperties": false
+      }
+    }
+  }
+]

@@ -5,6 +5,14 @@ keep people in the loop and to expose only tightly controlled, read-only tools.
 The initial target is a small local model such as a quantized Qwen 2B or 4B,
 running comfortably on a consumer laptop.
 
+## Features to be implemented
+
+- include golang ci
+- glow based markdown parsing during streaming content?
+- /model be able to switch between llama.cpp qwen and openai/fireworks
+- setup default system prompt (based on consult version)
+- skill use /analyse etc
+
 ## How this might be useful
 
 - Rather than running any command in bash, if this is necessary, the model can

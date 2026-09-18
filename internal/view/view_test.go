@@ -251,6 +251,24 @@ func TestStatusShowsBusySpinnerAndContext(t *testing.T) {
 	}
 }
 
+func TestContextAndToolEventsUpdateStatus(t *testing.T) {
+	m := initialModel()
+	m.busy = true
+	m, _ = updateModel(t, m, replEventMsg{event: repl.Event{
+		Kind:         repl.EventContext,
+		ContextUsed:  128,
+		ContextLimit: 4096,
+	}})
+	m, _ = updateModel(t, m, replEventMsg{event: repl.Event{Kind: repl.EventTool, Content: "Read"}})
+
+	if m.contextUsed != 128 || m.contextLimit != 4096 {
+		t.Fatalf("context = %d/%d", m.contextUsed, m.contextLimit)
+	}
+	if status := m.statusView(); !strings.Contains(status, "context: 128/4096") || !strings.Contains(status, "tool: Read") {
+		t.Fatalf("status = %q", status)
+	}
+}
+
 type fakeBackend struct {
 	events    chan repl.Event
 	submitID  uint64

@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -40,7 +41,7 @@ func TestOpenAIClientStreamsChatCompletion(t *testing.T) {
 	}
 	stream, err := client.Complete(context.Background(), Request{
 		Model:    "test-model",
-		Messages: []Message{{Role: "user", Content: "hello"}},
+		Messages: []Message{{Role: "user", Content: StringContent("hello")}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -117,6 +118,95 @@ func TestOpenAIClientReturnsMalformedStreamError(t *testing.T) {
 	defer stream.Close()
 	if _, err := stream.Next(); err == nil {
 		t.Fatal("expected malformed stream error")
+	}
+}
+
+func TestOpenAIClientStreamsToolCallsAndUsage(t *testing.T) {
+	server := newTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request Request
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatal(err)
+		}
+		if len(request.Tools) != 1 || request.Tools[0].Function.Name != "Read" {
+			t.Fatalf("tools = %+v", request.Tools)
+		}
+		if request.StreamOptions == nil || !request.StreamOptions.IncludeUsage {
+			t.Fatalf("stream options = %+v", request.StreamOptions)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		first := map[string]any{
+			"choices": []any{
+				map[string]any{
+					"delta": map[string]any{
+						"tool_calls": []any{
+							map[string]any{
+								"index": 0,
+								"id":    "call_1",
+								"function": map[string]string{
+									"name":      "Read",
+									"arguments": `{"filePath":"notes`,
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+		second := map[string]any{
+			"choices": []any{
+				map[string]any{
+					"delta": map[string]any{
+						"tool_calls": []any{
+							map[string]any{
+								"index": 0,
+								"function": map[string]string{
+									"arguments": `.txt"}`,
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+		firstJSON, _ := json.Marshal(first)
+		secondJSON, _ := json.Marshal(second)
+		_, _ = fmt.Fprintf(w, "data: %s\n\n", firstJSON)
+		_, _ = fmt.Fprintf(w, "data: %s\n\n", secondJSON)
+		_, _ = io.WriteString(w, "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":5,\"total_tokens\":17}}\n\n")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	client, err := NewClient(ClientConfig{Endpoint: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stream, err := client.Complete(context.Background(), Request{
+		Tools: []ToolDefinition{{
+			Type:     "function",
+			Function: FunctionDefinition{Name: "Read", Parameters: json.RawMessage(`{"type":"object"}`)},
+		}},
+		StreamOptions: &StreamOptions{IncludeUsage: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Close()
+
+	first, err := stream.Next()
+	if err != nil || len(first.ToolCall) != 1 || first.ToolCall[0].Arguments == "" {
+		t.Fatalf("first delta = %+v, err = %v", first, err)
+	}
+	second, err := stream.Next()
+	if err != nil || len(second.ToolCall) != 1 || second.ToolCall[0].Arguments != ".txt\"}" {
+		t.Fatalf("second delta = %+v, err = %v", second, err)
+	}
+	usage, err := stream.Next()
+	if err != nil || usage.Usage == nil || usage.Usage.TotalTokens != 17 {
+		t.Fatalf("usage delta = %+v, err = %v", usage, err)
+	}
+	if _, err := stream.Next(); err != io.EOF {
+		t.Fatalf("stream end error = %v, want io.EOF", err)
 	}
 }
 

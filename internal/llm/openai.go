@@ -117,17 +117,46 @@ func (s *stream) Next() (Delta, error) {
 		var response struct {
 			Choices []struct {
 				Delta struct {
-					Content string `json:"content"`
+					Content   string `json:"content"`
+					ToolCalls []struct {
+						Index    int    `json:"index"`
+						ID       string `json:"id"`
+						Function struct {
+							Name      string `json:"name"`
+							Arguments string `json:"arguments"`
+						} `json:"function"`
+					} `json:"tool_calls"`
 				} `json:"delta"`
 			} `json:"choices"`
+			Usage *Usage `json:"usage"`
 		}
 		if err := json.Unmarshal([]byte(payload), &response); err != nil {
 			return Delta{}, fmt.Errorf("decode streamed completion: %w", err)
 		}
-		if len(response.Choices) == 0 || response.Choices[0].Delta.Content == "" {
+
+		var delta Delta
+		if response.Usage != nil {
+			delta.Usage = response.Usage
+		}
+		if len(response.Choices) == 0 {
+			if delta.Usage != nil {
+				return delta, nil
+			}
 			continue
 		}
-		return Delta{Content: response.Choices[0].Delta.Content}, nil
+		delta.Content = response.Choices[0].Delta.Content
+		for _, toolCall := range response.Choices[0].Delta.ToolCalls {
+			delta.ToolCall = append(delta.ToolCall, ToolCallDelta{
+				Index:     toolCall.Index,
+				ID:        toolCall.ID,
+				Name:      toolCall.Function.Name,
+				Arguments: toolCall.Function.Arguments,
+			})
+		}
+		if delta.Content == "" && len(delta.ToolCall) == 0 && delta.Usage == nil {
+			continue
+		}
+		return delta, nil
 	}
 
 	if err := s.scanner.Err(); err != nil {

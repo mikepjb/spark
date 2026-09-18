@@ -2,14 +2,17 @@ package repl
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
 
 	"github.com/mikepjb/spark/internal/llm"
+	"github.com/mikepjb/spark/internal/tools"
 )
 
 type EventKind string
@@ -21,28 +24,36 @@ const (
 	EventCompleted    EventKind = "completed"
 	EventFailed       EventKind = "failed"
 	EventCancelled    EventKind = "cancelled"
+	EventContext      EventKind = "context"
+	EventTool         EventKind = "tool"
 	EventQueueCleared EventKind = "queue-cleared"
 	EventQueueFull    EventKind = "queue-full"
 )
 
 type Event struct {
-	Kind       EventKind
-	RequestID  uint64
-	Content    string
-	QueueCount int
-	Err        error
+	Kind         EventKind
+	RequestID    uint64
+	Content      string
+	QueueCount   int
+	ContextUsed  int
+	ContextLimit int
+	Err          error
 }
 
 type Config struct {
 	Model        string
 	SystemPrompt string
 	QueueLimit   int
+	ContextLimit int
+	Tools        *tools.Registry
 }
 
 var (
 	ErrClosed    = errors.New("repl is closed")
 	ErrQueueFull = errors.New("repl queue is full")
 )
+
+const maxToolRounds = 8
 
 type Coordinator struct {
 	client llm.Client
@@ -69,6 +80,9 @@ type request struct {
 func New(client llm.Client, config Config) *Coordinator {
 	if config.QueueLimit < 1 {
 		config.QueueLimit = 5
+	}
+	if config.ContextLimit < 1 {
+		config.ContextLimit = 64000
 	}
 
 	c := &Coordinator{
@@ -185,10 +199,10 @@ func (c *Coordinator) process(req request, ctx context.Context) {
 	c.mu.Lock()
 	messages := make([]llm.Message, 0, len(c.transcript)+2)
 	if c.config.SystemPrompt != "" {
-		messages = append(messages, llm.Message{Role: "system", Content: c.config.SystemPrompt})
+		messages = append(messages, llm.Message{Role: "system", Content: llm.StringContent(c.config.SystemPrompt)})
 	}
 	messages = append(messages, c.transcript...)
-	messages = append(messages, llm.Message{Role: "user", Content: req.content})
+	messages = append(messages, llm.Message{Role: "user", Content: llm.StringContent(req.content)})
 	c.mu.Unlock()
 	defer func() {
 		c.mu.Lock()
@@ -200,56 +214,161 @@ func (c *Coordinator) process(req request, ctx context.Context) {
 	}()
 
 	c.emit(Event{Kind: EventStarted, RequestID: req.id})
-	stream, err := c.client.Complete(ctx, llm.Request{
-		Model:    c.config.Model,
-		Messages: messages,
-		Stream:   true,
-	})
-	if err != nil {
-		if errors.Is(ctx.Err(), context.Canceled) {
-			c.emit(Event{Kind: EventCancelled, RequestID: req.id})
-			return
-		}
-		c.fail(req.id, err, true)
-		return
-	}
-	defer stream.Close()
 
-	var response strings.Builder
-	for {
-		delta, err := stream.Next()
+	var intermediate []llm.Message
+	for round := 0; ; round++ {
+		stream, err := c.client.Complete(ctx, llm.Request{
+			Model:         c.config.Model,
+			Messages:      messages,
+			Stream:        true,
+			Tools:         toolDefinitions(c.config.Tools),
+			StreamOptions: &llm.StreamOptions{IncludeUsage: true},
+		})
 		if err != nil {
-			if errors.Is(err, io.EOF) {
-				if errors.Is(ctx.Err(), context.Canceled) {
-					c.emit(Event{Kind: EventCancelled, RequestID: req.id, Content: response.String()})
-					return
-				}
-				c.complete(req, response.String())
-				return
-			}
 			if errors.Is(ctx.Err(), context.Canceled) {
-				c.emit(Event{Kind: EventCancelled, RequestID: req.id, Content: response.String()})
+				c.emit(Event{Kind: EventCancelled, RequestID: req.id})
 				return
 			}
 			c.fail(req.id, err, true)
 			return
 		}
-		if delta.Content == "" {
-			continue
+
+		response, calls, streamErr := c.readStream(ctx, req.id, stream)
+		_ = stream.Close()
+		if streamErr != nil {
+			if errors.Is(ctx.Err(), context.Canceled) {
+				c.emit(Event{Kind: EventCancelled, RequestID: req.id, Content: response})
+				return
+			}
+			c.fail(req.id, streamErr, true)
+			return
 		}
-		response.WriteString(delta.Content)
-		c.emit(Event{Kind: EventChunk, RequestID: req.id, Content: delta.Content})
+		if len(calls) == 0 {
+			c.complete(req, response, intermediate)
+			return
+		}
+		if round >= maxToolRounds {
+			c.fail(req.id, fmt.Errorf("tool-call limit reached after %d rounds", maxToolRounds), true)
+			return
+		}
+
+		assistant := llm.Message{Role: "assistant", Content: contentOrNil(response), ToolCalls: assistantToolCalls(calls)}
+		messages = append(messages, assistant)
+		intermediate = append(intermediate, assistant)
+		for _, call := range calls {
+			c.emit(Event{Kind: EventTool, RequestID: req.id, Content: call.Name})
+			result := tools.Result{Summary: "tool unavailable", Content: "tool execution is unavailable"}
+			if c.config.Tools != nil {
+				result = c.config.Tools.Execute(ctx, call)
+			}
+			toolMessage := llm.Message{Role: "tool", Content: llm.StringContent(result.Content), ToolCallID: call.ID}
+			messages = append(messages, toolMessage)
+			intermediate = append(intermediate, toolMessage)
+		}
 	}
 }
 
-func (c *Coordinator) complete(req request, response string) {
+func (c *Coordinator) readStream(ctx context.Context, requestID uint64, stream llm.Stream) (string, []llm.ToolCall, error) {
+	var response strings.Builder
+	fragments := make(map[int]*llm.ToolCallDelta)
+	for {
+		delta, err := stream.Next()
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				if ctx.Err() != nil {
+					return response.String(), nil, ctx.Err()
+				}
+				return response.String(), assembleToolCalls(fragments), nil
+			}
+			return response.String(), nil, err
+		}
+		if delta.Usage != nil {
+			c.emit(Event{Kind: EventContext, RequestID: requestID, ContextUsed: delta.Usage.TotalTokens, ContextLimit: c.config.ContextLimit})
+		}
+		if delta.Content != "" {
+			response.WriteString(delta.Content)
+			c.emit(Event{Kind: EventChunk, RequestID: requestID, Content: delta.Content})
+		}
+		for _, fragment := range delta.ToolCall {
+			call := fragments[fragment.Index]
+			if call == nil {
+				call = &llm.ToolCallDelta{Index: fragment.Index}
+				fragments[fragment.Index] = call
+			}
+			if fragment.ID != "" {
+				call.ID = fragment.ID
+			}
+			if fragment.Name != "" {
+				call.Name = fragment.Name
+			}
+			call.Arguments += fragment.Arguments
+		}
+		if err := ctx.Err(); err != nil {
+			return response.String(), nil, err
+		}
+	}
+}
+
+func assembleToolCalls(fragments map[int]*llm.ToolCallDelta) []llm.ToolCall {
+	indices := make([]int, 0, len(fragments))
+	for index := range fragments {
+		indices = append(indices, index)
+	}
+	sort.Ints(indices)
+	calls := make([]llm.ToolCall, 0, len(indices))
+	for _, index := range indices {
+		fragment := fragments[index]
+		id := fragment.ID
+		if id == "" {
+			id = fmt.Sprintf("call_%d", index)
+		}
+		arguments := strings.TrimSpace(fragment.Arguments)
+		if arguments == "" {
+			arguments = "{}"
+		}
+		calls = append(calls, llm.ToolCall{ID: id, Name: fragment.Name, Arguments: json.RawMessage(arguments)})
+	}
+	return calls
+}
+
+func assistantToolCalls(calls []llm.ToolCall) []llm.AssistantToolCall {
+	result := make([]llm.AssistantToolCall, 0, len(calls))
+	for _, call := range calls {
+		result = append(result, llm.AssistantToolCall{
+			Type: "function",
+			ID:   call.ID,
+			Function: llm.AssistantFunction{
+				Name:      call.Name,
+				Arguments: string(call.Arguments),
+			},
+		})
+	}
+	return result
+}
+
+func toolDefinitions(registry *tools.Registry) []llm.ToolDefinition {
+	if registry == nil {
+		return nil
+	}
+	return registry.Definitions()
+}
+
+func (c *Coordinator) complete(req request, response string, intermediate []llm.Message) {
 	c.mu.Lock()
 	c.transcript = append(c.transcript,
-		llm.Message{Role: "user", Content: req.content},
-		llm.Message{Role: "assistant", Content: response},
+		llm.Message{Role: "user", Content: llm.StringContent(req.content)},
 	)
+	c.transcript = append(c.transcript, intermediate...)
+	c.transcript = append(c.transcript, llm.Message{Role: "assistant", Content: llm.StringContent(response)})
 	c.mu.Unlock()
 	c.emit(Event{Kind: EventCompleted, RequestID: req.id})
+}
+
+func contentOrNil(value string) *string {
+	if value == "" {
+		return nil
+	}
+	return llm.StringContent(value)
 }
 
 func (c *Coordinator) fail(id uint64, err error, clearQueue bool) {

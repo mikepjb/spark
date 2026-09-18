@@ -7,6 +7,7 @@ import (
 	"github.com/mikepjb/spark/internal/config"
 	"github.com/mikepjb/spark/internal/llm"
 	"github.com/mikepjb/spark/internal/repl"
+	"github.com/mikepjb/spark/internal/tools"
 	"github.com/mikepjb/spark/internal/view"
 )
 
@@ -26,12 +27,25 @@ func main() {
 		os.Exit(1)
 	}
 
+	workspace, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Alas, there's been an error finding the workspace: %v\n", err)
+		os.Exit(1)
+	}
+	registry, err := tools.New(workspace)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Alas, there's been an error configuring tools: %v\n", err)
+		os.Exit(1)
+	}
+
 	coordinator := repl.New(client, repl.Config{
 		Model:        cfg.Model,
 		SystemPrompt: cfg.SystemPrompt,
 		QueueLimit:   cfg.QueueLimit,
+		ContextLimit: cfg.ContextLimit,
+		Tools:        registry,
 	})
-	if err := view.Start(coordinator, cfg.Model); err != nil {
+	if err := view.Start(coordinator, cfg.Model, cfg.ContextLimit); err != nil {
 		fmt.Fprintf(os.Stderr, "Alas, there's been an error: %v\n", err)
 		os.Exit(1)
 	}

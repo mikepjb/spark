@@ -4,11 +4,15 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/mikepjb/spark/internal/llm"
+	"github.com/mikepjb/spark/internal/tools"
 )
 
 type fakeClient struct {
@@ -53,6 +57,22 @@ func (s *fakeStream) Next() (llm.Delta, error) {
 }
 
 func (s *fakeStream) Close() error { return nil }
+
+type deltaStream struct {
+	deltas []llm.Delta
+	index  int
+}
+
+func (s *deltaStream) Next() (llm.Delta, error) {
+	if s.index == len(s.deltas) {
+		return llm.Delta{}, io.EOF
+	}
+	delta := s.deltas[s.index]
+	s.index++
+	return delta, nil
+}
+
+func (s *deltaStream) Close() error { return nil }
 
 type blockingStream struct {
 	started chan struct{}
@@ -100,16 +120,16 @@ func TestCoordinatorStreamsAndBuildsConversationHistory(t *testing.T) {
 
 	request := client.request(1)
 	want := []llm.Message{
-		{Role: "system", Content: "be concise"},
-		{Role: "user", Content: "first"},
-		{Role: "assistant", Content: "hello world"},
-		{Role: "user", Content: "next"},
+		{Role: "system", Content: llm.StringContent("be concise")},
+		{Role: "user", Content: llm.StringContent("first")},
+		{Role: "assistant", Content: llm.StringContent("hello world")},
+		{Role: "user", Content: llm.StringContent("next")},
 	}
 	if len(request.Messages) != len(want) {
 		t.Fatalf("message count = %d, want %d: %+v", len(request.Messages), len(want), request.Messages)
 	}
 	for i := range want {
-		if request.Messages[i] != want[i] {
+		if !reflect.DeepEqual(request.Messages[i], want[i]) {
 			t.Fatalf("message %d = %+v, want %+v", i, request.Messages[i], want[i])
 		}
 	}
@@ -149,6 +169,64 @@ func TestCoordinatorBoundsAndClearsQueueOnCancellation(t *testing.T) {
 			t.Fatalf("queued request started after cancellation: %+v", event)
 		}
 	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func TestCoordinatorExecutesToolCallsAndContinuesConversation(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "notes.txt"), []byte("tool result\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	registry, err := tools.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	client := newFakeClient()
+	client.streams <- &deltaStream{deltas: []llm.Delta{
+		{ToolCall: []llm.ToolCallDelta{{Index: 0, ID: "call_1", Name: "Read", Arguments: `{"filePath":"notes.txt"}`}}},
+		{Usage: &llm.Usage{TotalTokens: 12}},
+	}}
+	client.streams <- &deltaStream{deltas: []llm.Delta{
+		{Content: "finished"},
+		{Usage: &llm.Usage{TotalTokens: 20}},
+	}}
+
+	coordinator := New(client, Config{Model: "test-model", SystemPrompt: "be concise", Tools: registry})
+	defer coordinator.Close()
+	id, err := coordinator.Submit("inspect notes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitForEvent(t, coordinator.Events(), EventQueued, id)
+	waitForEvent(t, coordinator.Events(), EventStarted, id)
+	contextEvent := waitForEvent(t, coordinator.Events(), EventContext, id)
+	if contextEvent.ContextUsed != 12 || contextEvent.ContextLimit != 64000 {
+		t.Fatalf("first context event = %+v", contextEvent)
+	}
+	toolEvent := waitForEvent(t, coordinator.Events(), EventTool, id)
+	if toolEvent.Content != "Read" {
+		t.Fatalf("tool event = %+v", toolEvent)
+	}
+	waitForEvent(t, coordinator.Events(), EventChunk, id)
+	secondContext := waitForEvent(t, coordinator.Events(), EventContext, id)
+	if secondContext.ContextUsed != 20 {
+		t.Fatalf("second context event = %+v", secondContext)
+	}
+	waitForEvent(t, coordinator.Events(), EventCompleted, id)
+
+	request := client.request(1)
+	if len(request.Tools) != 7 {
+		t.Fatalf("tool definition count = %d, want 7", len(request.Tools))
+	}
+	if len(request.Messages) != 4 {
+		t.Fatalf("second request messages = %+v", request.Messages)
+	}
+	if request.Messages[2].Role != "assistant" || len(request.Messages[2].ToolCalls) != 1 {
+		t.Fatalf("assistant tool message = %+v", request.Messages[2])
+	}
+	if request.Messages[3].Role != "tool" || request.Messages[3].ToolCallID != "call_1" || request.Messages[3].Content == nil || *request.Messages[3].Content != "tool result" {
+		t.Fatalf("tool result message = %+v", request.Messages[3])
 	}
 }
 

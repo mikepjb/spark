@@ -25,6 +25,7 @@ config:
 		'model: ""' \
 		'system_prompt: ""' \
 		'queue_limit: 5' \
+		'context_limit: 64000' \
 		> "$$config_file" \
 	) || { \
 		echo "Could not create Spark config: $$config_file" >&2; \

@@ -223,11 +223,17 @@ func newModel(backend Backend, modelName string) model {
 	}
 }
 
-func Start(backend Backend, modelName string) error {
+func Start(backend Backend, modelName string, contextLimit int) error {
 	if backend != nil {
 		defer backend.Close()
 	}
-	p := tea.NewProgram(newModel(backend, modelName))
+	m := newModel(backend, modelName)
+	if contextLimit > 0 {
+		// The first context event will refresh this value with the server's
+		// observed usage while the configured limit is useful immediately.
+		m.contextLimit = contextLimit
+	}
+	p := tea.NewProgram(m)
 
 	if _, err := p.Run(); err != nil {
 		return err
@@ -374,6 +380,7 @@ func (m *model) handleReplEvent(event repl.Event) tea.Cmd {
 		m.finishMessage(event.RequestID, statusSucceeded, "")
 		m.busy = false
 		m.activeID = 0
+		m.notice = ""
 	case repl.EventFailed:
 		errorText := "request failed"
 		if event.Err != nil {
@@ -388,6 +395,14 @@ func (m *model) handleReplEvent(event repl.Event) tea.Cmd {
 		m.busy = false
 		m.activeID = 0
 		m.queued = 0
+		m.notice = ""
+	case repl.EventContext:
+		m.contextUsed = event.ContextUsed
+		if event.ContextLimit > 0 {
+			m.contextLimit = event.ContextLimit
+		}
+	case repl.EventTool:
+		m.notice = "tool: " + event.Content
 	case repl.EventQueueCleared:
 		m.queued = 0
 		m.notice = "queued messages cleared"
@@ -536,7 +551,11 @@ func (m model) View() tea.View {
 	}
 
 	if m.showSettings {
-		return m.overlayView("Settings", "Model: "+m.modelName, "Context: not connected", "Press esc to close")
+		context := "not connected"
+		if m.contextLimit > 0 {
+			context = fmt.Sprintf("%d/%d tokens", m.contextUsed, m.contextLimit)
+		}
+		return m.overlayView("Settings", "Model: "+m.modelName, "Context: "+context, "Press esc to close")
 	}
 
 	historyView := m.viewport.View()

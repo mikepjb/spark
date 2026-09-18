@@ -11,9 +11,10 @@ import (
 )
 
 const (
-	defaultEndpoint  = "http://127.0.0.1:7777"
-	defaultQueueSize = 5
-	defaultPath      = ".sparkrc"
+	defaultEndpoint     = "http://127.0.0.1:7777"
+	defaultQueueSize    = 5
+	defaultContextLimit = 64000
+	defaultPath         = ".sparkrc"
 )
 
 type Config struct {
@@ -22,6 +23,7 @@ type Config struct {
 	SystemPrompt string `yaml:"system_prompt"`
 	APIKey       string `yaml:"-"`
 	QueueLimit   int    `yaml:"queue_limit"`
+	ContextLimit int    `yaml:"context_limit"`
 }
 
 func Load() (Config, error) {
@@ -35,8 +37,9 @@ func Load() (Config, error) {
 
 func LoadFromFile(path string) (Config, error) {
 	cfg := Config{
-		Endpoint:   defaultEndpoint,
-		QueueLimit: defaultQueueSize,
+		Endpoint:     defaultEndpoint,
+		QueueLimit:   defaultQueueSize,
+		ContextLimit: defaultContextLimit,
 	}
 
 	data, err := os.ReadFile(path)
@@ -55,6 +58,9 @@ func LoadFromFile(path string) (Config, error) {
 	}
 	if cfg.QueueLimit < 1 {
 		return Config{}, fmt.Errorf("queue_limit must be at least 1")
+	}
+	if cfg.ContextLimit < 1 {
+		return Config{}, fmt.Errorf("context_limit must be at least 1")
 	}
 
 	return cfg, nil
@@ -79,6 +85,13 @@ func applyEnvironment(cfg *Config) error {
 			return fmt.Errorf("parse SPARK_QUEUE_LIMIT: %w", err)
 		}
 		cfg.QueueLimit = limit
+	}
+	if value, ok := os.LookupEnv("SPARK_CONTEXT_LIMIT"); ok {
+		limit, err := strconv.Atoi(value)
+		if err != nil {
+			return fmt.Errorf("parse SPARK_CONTEXT_LIMIT: %w", err)
+		}
+		cfg.ContextLimit = limit
 	}
 
 	return nil
