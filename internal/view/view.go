@@ -13,14 +13,14 @@ import (
 	"charm.land/lipgloss/v2"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/mikepjb/spark/internal/repl"
 )
 
-type LLM interface {
-	// send messages to the LLM/llama.cpp to process
-	Send()
-	// stream the response we get back? or do we give a reference back in the
-	// Send() response?
-	StreamResponse()
+type Backend interface {
+	Submit(string) (uint64, error)
+	Events() <-chan repl.Event
+	Cancel()
+	Close()
 }
 
 const (
@@ -36,6 +36,7 @@ const (
 	statusActive
 	statusSucceeded
 	statusFailed
+	statusCancelled
 )
 
 const (
@@ -48,6 +49,7 @@ const (
 	completedMarkerColor = "244"
 	succeededMarkerColor = "82"
 	failedMarkerColor    = "196"
+	cancelledMarkerColor = "214"
 )
 
 var (
@@ -68,10 +70,17 @@ var (
 )
 
 type chatMessage struct {
+	id      uint64
 	role    string
 	content string
 	status  messageStatus
 }
+
+type replEventMsg struct {
+	event repl.Event
+}
+
+type replClosedMsg struct{}
 
 type keyMap struct {
 	Submit        key.Binding
@@ -80,6 +89,7 @@ type keyMap struct {
 	Help          key.Binding
 	Settings      key.Binding
 	Close         key.Binding
+	Escape        key.Binding
 	ScrollUp      key.Binding
 	ScrollDown    key.Binding
 }
@@ -109,6 +119,9 @@ func newKeyMap() keyMap {
 		Close: key.NewBinding(
 			key.WithKeys("ctrl+c"),
 			key.WithHelp("ctrl+c", "close"),
+		),
+		Escape: key.NewBinding(
+			key.WithKeys("esc"),
 		),
 		ScrollUp: key.NewBinding(
 			key.WithKeys("pgup", "ctrl+up"),
@@ -140,14 +153,19 @@ type model struct {
 	help     help.Model
 	keys     keyMap
 
-	busy         bool
-	showHelp     bool
-	showSettings bool
-	modelName    string
-	contextUsed  int
-	contextLimit int
-	windowWidth  int
-	windowHeight int
+	busy          bool
+	queued        int
+	cancelConfirm bool
+	showHelp      bool
+	showSettings  bool
+	notice        string
+	activeID      uint64
+	modelName     string
+	contextUsed   int
+	contextLimit  int
+	windowWidth   int
+	windowHeight  int
+	backend       Backend
 }
 
 func inputStyles() textarea.Styles {
@@ -169,6 +187,10 @@ func inputStyles() textarea.Styles {
 }
 
 func initialModel() model {
+	return newModel(nil, "not connected")
+}
+
+func newModel(backend Backend, modelName string) model {
 	keys := newKeyMap()
 	input := textarea.New()
 	input.Placeholder = "Send a message..."
@@ -190,20 +212,22 @@ func initialModel() model {
 	})
 
 	return model{
-		history: []chatMessage{
-			{role: roleAssistant, content: "Spark joy!"},
-		},
+		history:   []chatMessage{},
 		input:     input,
 		viewport:  viewport.New(),
 		spinner:   spinner.New(spinner.WithSpinner(spinner.Dot)),
 		help:      help.New(),
 		keys:      keys,
-		modelName: "not connected",
+		modelName: modelName,
+		backend:   backend,
 	}
 }
 
-func Start() error {
-	p := tea.NewProgram(initialModel())
+func Start(backend Backend, modelName string) error {
+	if backend != nil {
+		defer backend.Close()
+	}
+	p := tea.NewProgram(newModel(backend, modelName))
 
 	if _, err := p.Run(); err != nil {
 		return err
@@ -213,11 +237,20 @@ func Start() error {
 }
 
 func (m model) Init() tea.Cmd {
-	return textarea.Blink
+	if m.backend == nil {
+		return textarea.Blink
+	}
+	return tea.Batch(textarea.Blink, waitForEvent(m.backend))
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case replEventMsg:
+		return m, tea.Batch(m.handleReplEvent(msg.event), waitForEvent(m.backend))
+
+	case replClosedMsg:
+		return m, nil
+
 	case tea.WindowSizeMsg:
 		m.resize(msg.Width, msg.Height)
 
@@ -237,30 +270,57 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyPressMsg:
-		if key.Matches(msg, m.keys.Quit) {
-			// Render one final frame without the real cursor so Bubble Tea can
-			// restore the terminal cursor state on shutdown.
-			m.input.Blur()
-			return m, tea.Quit
-		}
-
 		if m.showSettings {
-			if key.Matches(msg, m.keys.Close) || key.Matches(msg, m.keys.Settings) {
+			if key.Matches(msg, m.keys.Close) || key.Matches(msg, m.keys.Escape) || key.Matches(msg, m.keys.Settings) {
 				m.closeOverlay()
 			}
 			return m, nil
 		}
 
 		if m.showHelp {
-			if key.Matches(msg, m.keys.Close) || key.Matches(msg, m.keys.Help) {
+			if key.Matches(msg, m.keys.Close) || key.Matches(msg, m.keys.Escape) || key.Matches(msg, m.keys.Help) {
 				m.closeOverlay()
 			}
 			return m, nil
 		}
 
-		kpm, kpc := m.handleKeyPress(msg)
-		if kpm != nil {
-			return kpm, kpc
+		if m.cancelConfirm {
+			if key.Matches(msg, m.keys.Close) {
+				if m.backend != nil {
+					m.backend.Cancel()
+				}
+				m.cancelConfirm = false
+				m.input.Focus()
+				return m, nil
+			}
+			if key.Matches(msg, m.keys.Escape) {
+				m.cancelConfirm = false
+				m.input.Focus()
+				return m, nil
+			}
+			return m, nil
+		}
+
+		if key.Matches(msg, m.keys.Close) {
+			if m.busy {
+				m.cancelConfirm = true
+				m.input.Blur()
+				return m, nil
+			}
+			// Render one final frame without the real cursor so Bubble Tea can
+			// restore the terminal cursor state on shutdown.
+			m.input.Blur()
+			return m, tea.Quit
+		}
+
+		if key.Matches(msg, m.keys.Quit) {
+			m.input.Blur()
+			return m, tea.Quit
+		}
+
+		updated, handledCmd, handled := m.handleKeyPress(msg)
+		if handled {
+			return updated, handledCmd
 		}
 
 		var cmd tea.Cmd
@@ -275,6 +335,91 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+func waitForEvent(backend Backend) tea.Cmd {
+	return func() tea.Msg {
+		event, ok := <-backend.Events()
+		if !ok {
+			return replClosedMsg{}
+		}
+		return replEventMsg{event: event}
+	}
+}
+
+func (m *model) handleReplEvent(event repl.Event) tea.Cmd {
+	switch event.Kind {
+	case repl.EventQueued:
+		m.queued = event.QueueCount
+		m.history = append(m.history, chatMessage{id: event.RequestID, role: roleUser, content: event.Content})
+		m.notice = ""
+		m.refreshHistory(true)
+	case repl.EventStarted:
+		m.busy = true
+		if m.queued > 0 {
+			m.queued--
+		}
+		m.activeID = event.RequestID
+		m.history = append(m.history, chatMessage{id: event.RequestID, role: roleAssistant, status: statusActive})
+		m.refreshHistory(true)
+		var cmd tea.Cmd
+		m.spinner, cmd = m.spinner.Update(m.spinner.Tick())
+		return cmd
+	case repl.EventChunk:
+		if message := m.messageByID(event.RequestID, roleAssistant); message != nil {
+			message.content += event.Content
+			m.refreshHistory(true)
+		}
+	case repl.EventCompleted:
+		m.finishMessage(event.RequestID, statusSucceeded, "")
+		m.busy = false
+		m.activeID = 0
+	case repl.EventFailed:
+		errorText := "request failed"
+		if event.Err != nil {
+			errorText = event.Err.Error()
+		}
+		m.finishMessage(event.RequestID, statusFailed, errorText)
+		m.busy = false
+		m.activeID = 0
+		m.notice = errorText
+	case repl.EventCancelled:
+		m.finishMessage(event.RequestID, statusCancelled, "inference cancelled")
+		m.busy = false
+		m.activeID = 0
+		m.queued = 0
+	case repl.EventQueueCleared:
+		m.queued = 0
+		m.notice = "queued messages cleared"
+	case repl.EventQueueFull:
+		m.notice = "message queue is full"
+	}
+
+	return nil
+}
+
+func (m *model) messageByID(id uint64, role string) *chatMessage {
+	for i := range m.history {
+		if m.history[i].id == id && m.history[i].role == role {
+			return &m.history[i]
+		}
+	}
+	return nil
+}
+
+func (m *model) finishMessage(id uint64, status messageStatus, errorText string) {
+	message := m.messageByID(id, roleAssistant)
+	if message == nil {
+		return
+	}
+	message.status = status
+	if errorText != "" {
+		if message.content != "" {
+			message.content += "\n\n"
+		}
+		message.content += "[" + errorText + "]"
+	}
+	m.refreshHistory(true)
 }
 
 func (m *model) resize(width, height int) {
@@ -345,6 +490,8 @@ func messageMarker(message chatMessage) (string, string) {
 		return assistantMarker, succeededMarkerColor
 	case statusFailed:
 		return assistantMarker, failedMarkerColor
+	case statusCancelled:
+		return assistantMarker, cancelledMarkerColor
 	default:
 		return assistantMarker, completedMarkerColor
 	}
@@ -363,17 +510,31 @@ func (m model) statusView() string {
 		context = fmt.Sprintf("%d/%d", m.contextUsed, m.contextLimit)
 	}
 
-	return statusStyle.Render(fmt.Sprintf("%smodel: %s · context: %s · %s", activity, m.modelName, context, state))
+	queue := ""
+	if m.queued > 0 {
+		queue = fmt.Sprintf(" · queued: %d", m.queued)
+	}
+	notice := ""
+	if m.notice != "" {
+		notice = " · " + m.notice
+	}
+
+	return statusStyle.Render(fmt.Sprintf("%smodel: %s · context: %s · %s%s%s", activity, m.modelName, context, state, queue, notice))
 }
 
 func (m *model) closeOverlay() {
 	m.showSettings = false
 	m.showHelp = false
+	m.cancelConfirm = false
 	m.input.Focus()
 	m.resize(m.windowWidth, m.windowHeight)
 }
 
 func (m model) View() tea.View {
+	if m.cancelConfirm {
+		return m.overlayView("Cancel inference?", "Press ctrl+c again to cancel", "Press esc to continue")
+	}
+
 	if m.showSettings {
 		return m.overlayView("Settings", "Model: "+m.modelName, "Context: not connected", "Press esc to close")
 	}

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/mikepjb/spark/internal/repl"
 )
 
 func press(name string) tea.KeyPressMsg {
@@ -38,6 +39,9 @@ func updateModel(t *testing.T, m model, msg tea.Msg) (model, tea.Cmd) {
 
 func TestInitialModelConfiguresMultilineInput(t *testing.T) {
 	m := initialModel()
+	if len(m.history) != 0 {
+		t.Fatalf("expected no placeholder history, got %d messages", len(m.history))
+	}
 
 	if !m.input.DynamicHeight {
 		t.Fatal("expected dynamic textarea height")
@@ -71,10 +75,10 @@ func TestInputNewlineAndSubmit(t *testing.T) {
 
 	m.input.InsertString("second line")
 	m, _ = updateModel(t, m, press("enter"))
-	if got := len(m.history); got != 2 {
+	if got := len(m.history); got != 1 {
 		t.Fatalf("expected submitted message in history, got %d messages", got)
 	}
-	if got := m.history[1].content; got != "first line\nsecond line" {
+	if got := m.history[0].content; got != "first line\nsecond line" {
 		t.Fatalf("unexpected submitted content: %q", got)
 	}
 	if got := m.input.Value(); got != "" {
@@ -246,3 +250,86 @@ func TestStatusShowsBusySpinnerAndContext(t *testing.T) {
 		t.Fatal("expected busy spinner to schedule its next tick")
 	}
 }
+
+type fakeBackend struct {
+	events    chan repl.Event
+	submitID  uint64
+	submitErr error
+	cancelled int
+	closed    bool
+}
+
+func (b *fakeBackend) Submit(string) (uint64, error) {
+	return b.submitID, b.submitErr
+}
+
+func (b *fakeBackend) Events() <-chan repl.Event { return b.events }
+
+func (b *fakeBackend) Cancel() { b.cancelled++ }
+
+func (b *fakeBackend) Close() { b.closed = true }
+
+func TestReplEventsUpdateStreamingHistory(t *testing.T) {
+	backend := &fakeBackend{events: make(chan repl.Event), submitID: 1}
+	m := newModel(backend, "test-model")
+	m.resize(60, 20)
+
+	m, _ = updateModel(t, m, replEventMsg{event: repl.Event{Kind: repl.EventQueued, RequestID: 1, Content: "hello", QueueCount: 1}})
+	m, _ = updateModel(t, m, replEventMsg{event: repl.Event{Kind: repl.EventStarted, RequestID: 1}})
+	m, _ = updateModel(t, m, replEventMsg{event: repl.Event{Kind: repl.EventChunk, RequestID: 1, Content: "world"}})
+	m, _ = updateModel(t, m, replEventMsg{event: repl.Event{Kind: repl.EventCompleted, RequestID: 1}})
+
+	if len(m.history) != 2 {
+		t.Fatalf("history length = %d, want 2", len(m.history))
+	}
+	if m.history[1].content != "world" || m.history[1].status != statusSucceeded {
+		t.Fatalf("unexpected assistant message: %+v", m.history[1])
+	}
+	if m.busy {
+		t.Fatal("expected inference to be complete")
+	}
+}
+
+func TestCancelConfirmationCancelsInference(t *testing.T) {
+	backend := &fakeBackend{events: make(chan repl.Event)}
+	m := newModel(backend, "test-model")
+	m.busy = true
+
+	m, _ = updateModel(t, m, press("ctrl+c"))
+	if !m.cancelConfirm || m.input.Focused() {
+		t.Fatal("expected cancellation confirmation overlay")
+	}
+	if backend.cancelled != 0 {
+		t.Fatal("inference was cancelled before confirmation")
+	}
+
+	m, _ = updateModel(t, m, press("ctrl+c"))
+	if m.cancelConfirm || backend.cancelled != 1 {
+		t.Fatalf("confirmation did not cancel inference: confirm=%v cancels=%d", m.cancelConfirm, backend.cancelled)
+	}
+}
+
+func TestFailedStreamPreservesPartialHistory(t *testing.T) {
+	m := initialModel()
+	m.history = []chatMessage{
+		{id: 1, role: roleUser, content: "hello"},
+		{id: 1, role: roleAssistant, content: "partial", status: statusActive},
+	}
+	m.busy = true
+	m.resize(60, 20)
+
+	m, _ = updateModel(t, m, replEventMsg{event: repl.Event{Kind: repl.EventFailed, RequestID: 1, Err: errTestFailure}})
+
+	if m.history[1].content != "partial\n\n[test failure]" || m.history[1].status != statusFailed {
+		t.Fatalf("partial failure was not preserved: %+v", m.history[1])
+	}
+	if m.busy {
+		t.Fatal("expected failed inference to stop busy state")
+	}
+}
+
+var errTestFailure = testError("test failure")
+
+type testError string
+
+func (e testError) Error() string { return string(e) }
