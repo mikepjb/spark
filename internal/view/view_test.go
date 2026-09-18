@@ -1,4 +1,4 @@
-package main
+package view
 
 import (
 	"strings"
@@ -165,7 +165,57 @@ func TestHistoryScrollsWithViewport(t *testing.T) {
 	}
 }
 
-func TestHistoryKeepsRoleColorsWithoutVisiblePrefixes(t *testing.T) {
+func TestHistoryUsesMarkersAndIndentedContent(t *testing.T) {
+	m := initialModel()
+	m.history = []chatMessage{
+		{role: roleAssistant, content: "welcome\ncontinued and a long line that must wrap", status: statusActive},
+		{role: roleUser, content: "hello\nagain"},
+	}
+	m.resize(24, 10)
+
+	content := m.viewport.GetContent()
+	if strings.Contains(content, "assistant:") || strings.Contains(content, "you:") {
+		t.Fatalf("history still contains role prefixes: %q", content)
+	}
+	if !strings.Contains(content, assistantMarker) || !strings.Contains(content, userMarker) {
+		t.Fatalf("history did not contain role markers: %q", content)
+	}
+	for _, expected := range []string{"welcome", "continued", "hello", "again"} {
+		if !strings.Contains(content, expected) {
+			t.Fatalf("history did not contain %q: %q", expected, content)
+		}
+	}
+	if !strings.Contains(content, "\n  ") {
+		t.Fatalf("history did not indent continuation content: %q", content)
+	}
+}
+
+func TestMessageMarkersUseStatusColors(t *testing.T) {
+	tests := []struct {
+		name  string
+		role  string
+		state messageStatus
+		mark  string
+		color string
+	}{
+		{name: "user", role: roleUser, mark: userMarker, color: userMarkerColor},
+		{name: "active", role: roleAssistant, state: statusActive, mark: assistantMarker, color: activeMarkerColor},
+		{name: "completed", role: roleAssistant, state: statusCompleted, mark: assistantMarker, color: completedMarkerColor},
+		{name: "succeeded", role: roleAssistant, state: statusSucceeded, mark: assistantMarker, color: succeededMarkerColor},
+		{name: "failed", role: roleAssistant, state: statusFailed, mark: assistantMarker, color: failedMarkerColor},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			mark, color := messageMarker(chatMessage{role: test.role, status: test.state})
+			if mark != test.mark || color != test.color {
+				t.Fatalf("message marker = %q/%q, want %q/%q", mark, color, test.mark, test.color)
+			}
+		})
+	}
+}
+
+func TestHistoryPreservesMessageContent(t *testing.T) {
 	m := initialModel()
 	m.history = []chatMessage{
 		{role: roleAssistant, content: "welcome"},
@@ -174,9 +224,6 @@ func TestHistoryKeepsRoleColorsWithoutVisiblePrefixes(t *testing.T) {
 	m.resize(40, 10)
 
 	content := m.viewport.GetContent()
-	if strings.Contains(content, "assistant:") || strings.Contains(content, "you:") {
-		t.Fatalf("history still contains role prefixes: %q", content)
-	}
 	if !strings.Contains(content, "welcome") || !strings.Contains(content, "hello") {
 		t.Fatalf("history content was not rendered: %q", content)
 	}

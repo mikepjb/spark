@@ -15,17 +15,45 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
+type LLM interface {
+	// send messages to the LLM/llama.cpp to process
+	Send()
+	// stream the response we get back? or do we give a reference back in the
+	// Send() response?
+	StreamResponse()
+}
+
 const (
 	maxInputHeight = 6
 	roleUser       = "user"
 	roleAssistant  = "assistant"
 )
 
+type messageStatus uint8
+
+const (
+	statusCompleted messageStatus = iota
+	statusActive
+	statusSucceeded
+	statusFailed
+)
+
+const (
+	userMarker           = "›"
+	assistantMarker      = "•"
+	historyContentIndent = "  "
+	promptBorderColor    = lipgloss.BrightBlack
+	userMarkerColor      = "86"
+	activeMarkerColor    = "255"
+	completedMarkerColor = "244"
+	succeededMarkerColor = "82"
+	failedMarkerColor    = "196"
+)
+
 var (
 	inputBoxStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("240")).
-			Background(lipgloss.Color("235"))
+			BorderForeground(promptBorderColor)
 	statusStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("244")).
 			PaddingLeft(1)
@@ -42,6 +70,7 @@ var (
 type chatMessage struct {
 	role    string
 	content string
+	status  messageStatus
 }
 
 type keyMap struct {
@@ -62,8 +91,8 @@ func newKeyMap() keyMap {
 			key.WithHelp("enter", "send"),
 		),
 		Quit: key.NewBinding(
-			key.WithKeys("ctrl+c"),
-			key.WithHelp("ctrl+c", "quit"),
+			key.WithKeys("ctrl+q"),
+			key.WithHelp("ctrl+q", "quit"),
 		),
 		InsertNewline: key.NewBinding(
 			key.WithKeys("ctrl+j"),
@@ -78,8 +107,8 @@ func newKeyMap() keyMap {
 			key.WithHelp("ctrl+,", "settings"),
 		),
 		Close: key.NewBinding(
-			key.WithKeys("esc"),
-			key.WithHelp("esc", "close"),
+			key.WithKeys("ctrl+c"),
+			key.WithHelp("ctrl+c", "close"),
 		),
 		ScrollUp: key.NewBinding(
 			key.WithKeys("pgup", "ctrl+up"),
@@ -121,11 +150,28 @@ type model struct {
 	windowHeight int
 }
 
+func inputStyles() textarea.Styles {
+	styles := textarea.DefaultDarkStyles()
+
+	unsetBackground := func(s *textarea.StyleState) {
+		s.Base = s.Base.UnsetBackground()
+		s.Prompt = s.Prompt.UnsetBackground()
+		s.Text = s.Text.UnsetBackground()
+		s.CursorLine = s.CursorLine.UnsetBackground()
+		s.Placeholder = s.Placeholder.UnsetBackground()
+		s.EndOfBuffer = s.EndOfBuffer.UnsetBackground()
+	}
+
+	unsetBackground(&styles.Focused)
+	unsetBackground(&styles.Blurred)
+
+	return styles
+}
+
 func initialModel() model {
 	keys := newKeyMap()
 	input := textarea.New()
 	input.Placeholder = "Send a message..."
-	input.Prompt = "› "
 	input.DynamicHeight = true
 	input.MinHeight = 1
 	input.MaxHeight = maxInputHeight
@@ -133,7 +179,15 @@ func initialModel() model {
 	input.SetVirtualCursor(false)
 	input.KeyMap.InsertNewline.SetKeys(keys.InsertNewline.Keys()...)
 	input.KeyMap.InsertNewline.SetHelp("ctrl+j", "new line")
+	input.SetStyles(inputStyles())
 	input.Focus()
+
+	input.SetPromptFunc(2, func(info textarea.PromptInfo) string {
+		if info.LineNumber == 0 {
+			return "› "
+		}
+		return "  "
+	})
 
 	return model{
 		history: []chatMessage{
@@ -201,6 +255,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if key.Matches(msg, m.keys.Close) || key.Matches(msg, m.keys.Help) {
 				m.closeOverlay()
 			}
+			return m, nil
+		}
+
+		if key.Matches(msg, m.keys.Close) {
+			m.input.Reset()
+			m.resize(m.windowWidth, m.windowHeight)
 			return m, nil
 		}
 
@@ -273,18 +333,53 @@ func (m *model) refreshHistory(forceBottom bool) {
 
 	var messages []string
 	for _, message := range m.history {
-		style := lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
-		if message.role == roleUser {
-			style = style.Foreground(lipgloss.Color("86"))
-		}
-		messages = append(messages, style.Render(message.content))
+		messages = append(messages, renderHistoryMessage(message, m.viewport.Width()))
 	}
 
 	content := strings.Join(messages, "\n\n")
-	content = lipgloss.NewStyle().Width(m.viewport.Width()).Render(content)
 	m.viewport.SetContent(content)
 	if atBottom {
 		m.viewport.GotoBottom()
+	}
+}
+
+func renderHistoryMessage(message chatMessage, width int) string {
+	marker, markerColor := messageMarker(message)
+	contentColor := "252"
+	if message.role == roleUser {
+		contentColor = userMarkerColor
+	}
+
+	markerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(markerColor))
+	contentStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(contentColor))
+	contentWidth := atLeastOne(width - lipgloss.Width(historyContentIndent))
+	lines := strings.Split(lipgloss.Wrap(message.content, contentWidth, ""), "\n")
+	rendered := make([]string, len(lines))
+	for i, line := range lines {
+		prefix := historyContentIndent
+		if i == 0 {
+			prefix = markerStyle.Render(marker) + " "
+		}
+		rendered[i] = prefix + contentStyle.Render(line)
+	}
+
+	return strings.Join(rendered, "\n")
+}
+
+func messageMarker(message chatMessage) (string, string) {
+	if message.role == roleUser {
+		return userMarker, userMarkerColor
+	}
+
+	switch message.status {
+	case statusActive:
+		return assistantMarker, activeMarkerColor
+	case statusSucceeded:
+		return assistantMarker, succeededMarkerColor
+	case statusFailed:
+		return assistantMarker, failedMarkerColor
+	default:
+		return assistantMarker, completedMarkerColor
 	}
 }
 

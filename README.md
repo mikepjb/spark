@@ -12,7 +12,12 @@ running comfortably on a consumer laptop.
   but there is at least some level of exposure and learning that you won't get
   with a fully autonomous agent.
 
-## Approach
+## Human Approach
+
+- I want to use the `/v1/chat/completions` API running against llama.cpp that
+  has Qwen 3.5 2B loaded.
+
+## Generated Approach
 
 Spark will be a local TUI and agent coordinator that connects to an externally
 managed LLM server:
