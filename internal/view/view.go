@@ -13,6 +13,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/mikepjb/spark/internal/commands"
 	"github.com/mikepjb/spark/internal/repl"
 )
 
@@ -21,6 +22,10 @@ type Backend interface {
 	Events() <-chan repl.Event
 	Cancel()
 	Close()
+}
+
+type submissionBackend interface {
+	SubmitSubmission(repl.Submission) (uint64, error)
 }
 
 const (
@@ -88,15 +93,18 @@ type replEventMsg struct {
 type replClosedMsg struct{}
 
 type keyMap struct {
-	Submit        key.Binding
-	Quit          key.Binding
-	InsertNewline key.Binding
-	Help          key.Binding
-	Settings      key.Binding
-	Close         key.Binding
-	Escape        key.Binding
-	ScrollUp      key.Binding
-	ScrollDown    key.Binding
+	Submit           key.Binding
+	Quit             key.Binding
+	InsertNewline    key.Binding
+	Help             key.Binding
+	Settings         key.Binding
+	Close            key.Binding
+	Escape           key.Binding
+	CompletionUp     key.Binding
+	CompletionDown   key.Binding
+	CompletionAccept key.Binding
+	ScrollUp         key.Binding
+	ScrollDown       key.Binding
 }
 
 func newKeyMap() keyMap {
@@ -127,6 +135,15 @@ func newKeyMap() keyMap {
 		),
 		Escape: key.NewBinding(
 			key.WithKeys("esc"),
+		),
+		CompletionUp: key.NewBinding(
+			key.WithKeys("up", "ctrl+p"),
+		),
+		CompletionDown: key.NewBinding(
+			key.WithKeys("down", "ctrl+n"),
+		),
+		CompletionAccept: key.NewBinding(
+			key.WithKeys("tab", "right"),
 		),
 		ScrollUp: key.NewBinding(
 			key.WithKeys("pgup", "ctrl+up"),
@@ -172,6 +189,9 @@ type model struct {
 	windowHeight  int
 	markdown      markdownRenderer
 	backend       Backend
+	commands      *commands.Engine
+	completion    commands.Completion
+	completionIdx int
 }
 
 func inputStyles() textarea.Styles {
@@ -192,7 +212,7 @@ func inputStyles() textarea.Styles {
 	return styles
 }
 
-func newModel(backend Backend, modelName string) model {
+func newModel(backend Backend, modelName string, commandEngines ...*commands.Engine) model {
 	keys := newKeyMap()
 	input := textarea.New()
 	input.Placeholder = "Send a message..."
@@ -213,6 +233,10 @@ func newModel(backend Backend, modelName string) model {
 		return "  "
 	})
 
+	var commandEngine *commands.Engine
+	if len(commandEngines) > 0 {
+		commandEngine = commandEngines[0]
+	}
 	return model{
 		history:   []chatMessage{},
 		input:     input,
@@ -222,14 +246,15 @@ func newModel(backend Backend, modelName string) model {
 		keys:      keys,
 		modelName: modelName,
 		backend:   backend,
+		commands:  commandEngine,
 	}
 }
 
-func Start(backend Backend, modelName string, contextLimit int) error {
+func Start(backend Backend, modelName string, contextLimit int, commandEngine *commands.Engine) error {
 	if backend != nil {
 		defer backend.Close()
 	}
-	m := newModel(backend, modelName)
+	m := newModel(backend, modelName, commandEngine)
 	if contextLimit > 0 {
 		// The first context event will refresh this value with the server's
 		// observed usage while the configured limit is useful immediately.
@@ -333,6 +358,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		var cmd tea.Cmd
 		m.input, cmd = m.input.Update(msg)
+		m.refreshCompletion()
 		m.resize(m.windowWidth, m.windowHeight)
 		return m, cmd
 
@@ -496,6 +522,7 @@ func (m *model) resize(width, height int) {
 	m.input.SetWidth(atLeastOne(width - 2))
 
 	footerHeight := lipgloss.Height(m.statusView())
+	footerHeight += lipgloss.Height(m.completionView())
 	if m.showHelp {
 		footerHeight += lipgloss.Height(m.help.View(m.keys))
 	}
@@ -634,9 +661,14 @@ func (m model) View() tea.View {
 
 	historyView := m.viewport.View()
 	inputView := inputBoxStyle.Render(m.input.View())
+	completionView := m.completionView()
 	statusView := m.statusView()
 
-	parts := []string{historyView, inputView, statusView}
+	parts := []string{historyView, inputView}
+	if completionView != "" {
+		parts = append(parts, completionView)
+	}
+	parts = append(parts, statusView)
 	if m.showHelp {
 		parts = append(parts, helpStyle.Render(m.help.View(m.keys)))
 	}

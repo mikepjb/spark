@@ -76,3 +76,19 @@ func TestLoadFromFileRejectsInvalidQueueLimit(t *testing.T) {
 		t.Fatal("expected invalid queue limit error")
 	}
 }
+
+func TestLoadFromFileReadsModelsProvidersAndSkillPaths(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".sparkrc")
+	contents := []byte("model: local\nproviders:\n  local:\n    endpoint: http://127.0.0.1:7777\nmodels:\n  local:\n    provider: local\n    model: qwen\nskill_paths:\n  - .agents/skills\n")
+	if err := os.WriteFile(path, contents, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := LoadFromFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Model != "local" || got.Providers["local"].Endpoint != "http://127.0.0.1:7777" || got.Models["local"].Model != "qwen" || len(got.SkillPaths) != 1 {
+		t.Fatalf("config = %+v", got)
+	}
+}

@@ -51,6 +51,17 @@ type Config struct {
 	Tools        *tools.Registry
 }
 
+type SkillUse struct {
+	Name string
+	Body string
+}
+
+type Submission struct {
+	Display string
+	Prompt  string
+	Skills  []SkillUse
+}
+
 var (
 	ErrClosed    = errors.New("repl is closed")
 	ErrQueueFull = errors.New("repl queue is full")
@@ -65,6 +76,7 @@ type Coordinator struct {
 	mu           sync.Mutex
 	queue        []request
 	transcript   []llm.Message
+	activeSkills map[string]string
 	activeCancel context.CancelFunc
 	closed       bool
 
@@ -76,8 +88,10 @@ type Coordinator struct {
 }
 
 type request struct {
-	id      uint64
-	content string
+	id        uint64
+	display   string
+	content   string
+	skillUses []SkillUse
 }
 
 func New(client llm.Client, config Config) *Coordinator {
@@ -89,14 +103,24 @@ func New(client llm.Client, config Config) *Coordinator {
 	}
 
 	c := &Coordinator{
-		client: client,
-		config: config,
-		wake:   make(chan struct{}, 1),
-		done:   make(chan struct{}),
-		events: make(chan Event, 64),
+		client:       client,
+		config:       config,
+		activeSkills: make(map[string]string),
+		wake:         make(chan struct{}, 1),
+		done:         make(chan struct{}),
+		events:       make(chan Event, 64),
 	}
 	go c.run()
 	return c
+}
+
+func sortedSkillNames(skills map[string]string) []string {
+	names := make([]string, 0, len(skills))
+	for name := range skills {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 func (c *Coordinator) Events() <-chan Event {
@@ -104,8 +128,19 @@ func (c *Coordinator) Events() <-chan Event {
 }
 
 func (c *Coordinator) Submit(content string) (uint64, error) {
-	content = strings.TrimSpace(content)
+	return c.SubmitSubmission(Submission{Display: content, Prompt: content})
+}
+
+func (c *Coordinator) SubmitSubmission(submission Submission) (uint64, error) {
+	display := strings.TrimSpace(submission.Display)
+	content := strings.TrimSpace(submission.Prompt)
+	if display == "" {
+		display = content
+	}
 	if content == "" {
+		content = display
+	}
+	if display == "" {
 		return 0, fmt.Errorf("message cannot be empty")
 	}
 
@@ -122,12 +157,29 @@ func (c *Coordinator) Submit(content string) (uint64, error) {
 	}
 
 	id := c.nextID.Add(1)
-	c.queue = append(c.queue, request{id: id, content: content})
+	c.queue = append(c.queue, request{id: id, display: display, content: content, skillUses: submission.Skills})
 	queueCount := len(c.queue)
 	c.mu.Unlock()
-	c.emit(Event{Kind: EventQueued, RequestID: id, Content: content, QueueCount: queueCount})
+	c.emit(Event{Kind: EventQueued, RequestID: id, Content: display, QueueCount: queueCount})
 	c.signal()
 	return id, nil
+}
+
+func (c *Coordinator) SetModel(client llm.Client, model string) error {
+	if client == nil {
+		return fmt.Errorf("model client cannot be nil")
+	}
+	if strings.TrimSpace(model) == "" {
+		return fmt.Errorf("model name cannot be empty")
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return ErrClosed
+	}
+	c.client = client
+	c.config.Model = model
+	return nil
 }
 
 func (c *Coordinator) Cancel() {
@@ -204,8 +256,18 @@ func (c *Coordinator) process(req request, ctx context.Context) {
 	if c.config.SystemPrompt != "" {
 		messages = append(messages, llm.Message{Role: "system", Content: llm.StringContent(c.config.SystemPrompt)})
 	}
+	for _, skill := range req.skillUses {
+		if _, exists := c.activeSkills[skill.Name]; !exists {
+			c.activeSkills[skill.Name] = skill.Body
+		}
+	}
+	for _, name := range sortedSkillNames(c.activeSkills) {
+		messages = append(messages, llm.Message{Role: "system", Content: llm.StringContent(c.activeSkills[name])})
+	}
 	messages = append(messages, c.transcript...)
 	messages = append(messages, llm.Message{Role: "user", Content: llm.StringContent(req.content)})
+	client := c.client
+	model := c.config.Model
 	c.mu.Unlock()
 	defer func() {
 		c.mu.Lock()
@@ -220,8 +282,8 @@ func (c *Coordinator) process(req request, ctx context.Context) {
 
 	var intermediate []llm.Message
 	for round := 0; ; round++ {
-		stream, err := c.client.Complete(ctx, llm.Request{
-			Model:         c.config.Model,
+		stream, err := client.Complete(ctx, llm.Request{
+			Model:         model,
 			Messages:      messages,
 			Stream:        true,
 			Tools:         toolDefinitions(c.config.Tools),

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/mikepjb/spark/internal/commands"
 	"github.com/mikepjb/spark/internal/repl"
 )
 
@@ -91,6 +92,32 @@ func TestInputNewlineAndSubmit(t *testing.T) {
 	}
 	if m.input.Height() != 1 {
 		t.Fatalf("expected textarea to shrink after submit, got %d", m.input.Height())
+	}
+}
+
+func TestInlineCommandCompletionAndNestedModelSelection(t *testing.T) {
+	engine := commands.New(nil, []commands.ModelOption{{Name: "local", Provider: "local", Model: "qwen"}}, nil, nil)
+	m := newModel(nil, "qwen", engine)
+	m.resize(60, 20)
+	m.input.SetValue("/mo")
+	m.refreshCompletion()
+	if len(m.completion.Items) != 1 || m.completion.Items[0].Text != "/model" {
+		t.Fatalf("completion = %+v", m.completion)
+	}
+
+	m, _ = updateModel(t, m, press("enter"))
+	if m.input.Value() != "/model" || len(m.completion.Items) != 1 || m.completion.Items[0].Label != "local" {
+		t.Fatalf("nested completion input=%q completion=%+v", m.input.Value(), m.completion)
+	}
+}
+
+func TestLocalCommandDoesNotUseBackend(t *testing.T) {
+	engine := commands.New(nil, nil, nil, nil)
+	m := newModel(nil, "qwen", engine)
+	m.input.SetValue("/about")
+	m, _ = updateModel(t, m, press("enter"))
+	if len(m.history) != 2 || !strings.Contains(m.history[1].content, "Spark") {
+		t.Fatalf("history = %+v", m.history)
 	}
 }
 

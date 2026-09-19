@@ -135,6 +135,61 @@ func TestCoordinatorStreamsAndBuildsConversationHistory(t *testing.T) {
 	}
 }
 
+func TestCoordinatorActivatesSkillsWithoutDuplicatingDefinitions(t *testing.T) {
+	client := newFakeClient()
+	client.streams <- &fakeStream{deltas: []string{"done"}}
+	client.streams <- &fakeStream{deltas: []string{"again"}}
+	coordinator := New(client, Config{Model: "test-model", SystemPrompt: "base"})
+	defer coordinator.Close()
+
+	firstID, err := coordinator.SubmitSubmission(Submission{
+		Display: "/analyse inspect",
+		Prompt:  "inspect",
+		Skills:  []SkillUse{{Name: "analyse", Body: "Use evidence."}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitForEvent(t, coordinator.Events(), EventCompleted, firstID)
+
+	secondID, err := coordinator.Submit("next")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitForEvent(t, coordinator.Events(), EventCompleted, secondID)
+
+	request := client.request(1)
+	if len(request.Messages) != 5 || request.Messages[1].Content == nil || *request.Messages[1].Content != "Use evidence." {
+		t.Fatalf("second request messages = %+v", request.Messages)
+	}
+}
+
+func TestCoordinatorCanSwitchModelsForNewRequests(t *testing.T) {
+	first := newFakeClient()
+	second := newFakeClient()
+	first.streams <- &fakeStream{deltas: []string{"first"}}
+	second.streams <- &fakeStream{deltas: []string{"second"}}
+	coordinator := New(first, Config{Model: "old-model"})
+	defer coordinator.Close()
+
+	firstID, err := coordinator.Submit("one")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitForEvent(t, coordinator.Events(), EventCompleted, firstID)
+	if err := coordinator.SetModel(second, "new-model"); err != nil {
+		t.Fatal(err)
+	}
+	secondID, err := coordinator.Submit("two")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitForEvent(t, coordinator.Events(), EventCompleted, secondID)
+	if request := second.request(0); request.Model != "new-model" {
+		t.Fatalf("new request model = %q", request.Model)
+	}
+}
+
 func TestCoordinatorBoundsAndClearsQueueOnCancellation(t *testing.T) {
 	client := newFakeClient()
 	coordinator := New(client, Config{QueueLimit: 5})

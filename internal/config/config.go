@@ -58,12 +58,24 @@ suggestions. Never expose or request secrets unnecessarily.`
 )
 
 type Config struct {
-	Endpoint     string `yaml:"endpoint"`
-	Model        string `yaml:"model"`
-	SystemPrompt string `yaml:"system_prompt"`
-	APIKey       string `yaml:"-"`
-	QueueLimit   int    `yaml:"queue_limit"`
-	ContextLimit int    `yaml:"context_limit"`
+	Endpoint     string                    `yaml:"endpoint"`
+	Model        string                    `yaml:"model"`
+	SystemPrompt string                    `yaml:"system_prompt"`
+	APIKey       string                    `yaml:"-"`
+	QueueLimit   int                       `yaml:"queue_limit"`
+	ContextLimit int                       `yaml:"context_limit"`
+	Providers    map[string]ProviderConfig `yaml:"providers"`
+	Models       map[string]ModelConfig    `yaml:"models"`
+	SkillPaths   []string                  `yaml:"skill_paths"`
+}
+
+type ProviderConfig struct {
+	Endpoint string `yaml:"endpoint"`
+}
+
+type ModelConfig struct {
+	Provider string `yaml:"provider"`
+	Model    string `yaml:"model"`
 }
 
 func Load() (Config, error) {
