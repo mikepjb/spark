@@ -62,6 +62,8 @@ const (
 	succeededMarkerColor = "82"
 	failedMarkerColor    = "196"
 	cancelledMarkerColor = "214"
+	workingColor         = "252"
+	workingHintColor     = "241"
 )
 
 var (
@@ -532,7 +534,19 @@ func (m *model) messageByToolID(requestID uint64, toolID string) *chatMessage {
 }
 
 func (m *model) finishMessage(id uint64, status messageStatus, errorText string) {
-	message := m.messageByID(id, roleAssistant)
+	var message *chatMessage
+	for i := len(m.history) - 1; i >= 0; i-- {
+		candidate := &m.history[i]
+		if candidate.id != id || candidate.role != roleAssistant {
+			continue
+		}
+		if message == nil {
+			message = candidate
+		}
+		if candidate.status == statusActive {
+			candidate.status = status
+		}
+	}
 	if message == nil {
 		return
 	}
@@ -570,7 +584,16 @@ func (m *model) refreshHistory(forceBottom bool) {
 	atBottom := forceBottom || m.viewport.AtBottom()
 
 	var messages []string
+	var workingMessages []string
 	for i := 0; i < len(m.history); {
+		if isWorkingMessage(m.history[i]) {
+			if rendered := renderHistoryMessageWithIndent(&m.history[i], m.viewport.Width(), &m.markdown, "", m.spinner.View()); rendered != "" {
+				workingMessages = append(workingMessages, rendered)
+			}
+			i++
+			continue
+		}
+
 		if isExploratoryTool(m.history[i]) {
 			end := i + 1
 			for end < len(m.history) && isExploratoryTool(m.history[end]) {
@@ -588,6 +611,7 @@ func (m *model) refreshHistory(forceBottom bool) {
 		}
 		i++
 	}
+	messages = append(messages, workingMessages...)
 
 	content := strings.Join(messages, "\n\n")
 	m.viewport.SetContent(content)
@@ -597,10 +621,10 @@ func (m *model) refreshHistory(forceBottom bool) {
 }
 
 func renderHistoryMessage(message *chatMessage, width int, markdown *markdownRenderer) string {
-	return renderHistoryMessageWithIndent(message, width, markdown, "")
+	return renderHistoryMessageWithIndent(message, width, markdown, "", "")
 }
 
-func renderHistoryMessageWithIndent(message *chatMessage, width int, markdown *markdownRenderer, indent string) string {
+func renderHistoryMessageWithIndent(message *chatMessage, width int, markdown *markdownRenderer, indent, spinnerFrame string) string {
 	if message.role == roleAssistant && strings.TrimSpace(message.content) == "" && message.status != statusActive {
 		return ""
 	}
@@ -616,7 +640,7 @@ func renderHistoryMessageWithIndent(message *chatMessage, width int, markdown *m
 	contentWidth := atLeastOne(width - lipgloss.Width(indent) - lipgloss.Width(historyContentIndent))
 	var lines []string
 	if message.role == roleAssistant && strings.TrimSpace(message.content) == "" {
-		lines = []string{contentStyle.Render(workingMessage(*message))}
+		lines = []string{renderWorkingMessage(*message, spinnerFrame)}
 	} else if message.role == roleAssistant {
 		if !message.renderedContentValid || message.renderedContentWidth != contentWidth {
 			formatted, err := markdown.render(message.content, contentWidth)
@@ -658,7 +682,7 @@ func renderExploreGroup(messages []chatMessage, width int, markdown *markdownRen
 	contentStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
 	lines := []string{markerStyle.Render(marker) + " " + contentStyle.Render(exploreLabel)}
 	for i := range messages {
-		if rendered := renderHistoryMessageWithIndent(&messages[i], width, markdown, historyContentIndent); rendered != "" {
+		if rendered := renderHistoryMessageWithIndent(&messages[i], width, markdown, historyContentIndent, ""); rendered != "" {
 			lines = append(lines, rendered)
 		}
 	}
@@ -704,15 +728,31 @@ func isExploratoryTool(message chatMessage) bool {
 	}
 }
 
-func workingMessage(message chatMessage) string {
-	seconds := 0
-	if !message.startedAt.IsZero() {
-		elapsed := time.Since(message.startedAt)
-		if elapsed > 0 {
-			seconds = int(elapsed / time.Second)
-		}
+func workingSeconds(message chatMessage) int {
+	if message.startedAt.IsZero() {
+		return 0
 	}
-	return fmt.Sprintf("Working (%ds · esc to interrupt)", seconds)
+
+	elapsed := time.Since(message.startedAt)
+	if elapsed <= 0 {
+		return 0
+	}
+	return int(elapsed / time.Second)
+}
+
+func renderWorkingMessage(message chatMessage, spinnerFrame string) string {
+	spinnerFrame = strings.TrimSpace(spinnerFrame)
+	if spinnerFrame != "" {
+		spinnerFrame += " "
+	}
+
+	workingStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(workingColor))
+	hintStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(workingHintColor))
+	return workingStyle.Render(spinnerFrame+"Working") + " " + hintStyle.Render(fmt.Sprintf("(%ds · esc to interrupt)", workingSeconds(message)))
+}
+
+func isWorkingMessage(message chatMessage) bool {
+	return message.role == roleAssistant && message.status == statusActive && strings.TrimSpace(message.content) == ""
 }
 
 func messageMarker(message chatMessage) (string, string) {

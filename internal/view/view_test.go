@@ -9,6 +9,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/mikepjb/spark/internal/commands"
 	"github.com/mikepjb/spark/internal/llm"
@@ -301,6 +302,67 @@ func TestActiveEmptyAssistantShowsWorkingElapsed(t *testing.T) {
 	content := ansi.Strip(m.viewport.GetContent())
 	if !strings.Contains(content, "Working (9s · esc to interrupt)") {
 		t.Fatalf("working message = %q", content)
+	}
+}
+
+func TestWorkingMessageStaysBelowToolHistory(t *testing.T) {
+	m := initialModel()
+	m.history = []chatMessage{
+		{role: roleUser, content: "inspect the project"},
+		{role: roleAssistant, status: statusActive, startedAt: time.Now().Add(-9 * time.Second)},
+		{role: roleTool, toolName: "Read", content: "Read README.md", status: statusSucceeded},
+	}
+	m.resize(80, 12)
+
+	content := ansi.Strip(m.viewport.GetContent())
+	toolIndex := strings.Index(content, "Read README.md")
+	workingIndex := strings.Index(content, "Working")
+	if toolIndex < 0 || workingIndex <= toolIndex {
+		t.Fatalf("working message was not rendered below tool history: %q", content)
+	}
+	if !strings.HasSuffix(strings.TrimSpace(content), "(9s · esc to interrupt)") {
+		t.Fatalf("working message was not the final history entry: %q", content)
+	}
+
+	m.history[1].status = statusSucceeded
+	m.history[1].content = "done"
+	m.refreshHistory(true)
+	if content := ansi.Strip(m.viewport.GetContent()); strings.Contains(content, "Working") {
+		t.Fatalf("resolved assistant still showed working status: %q", content)
+	}
+}
+
+func TestWorkingMessageUsesSpinnerAndSubduedHint(t *testing.T) {
+	message := chatMessage{role: roleAssistant, status: statusActive, startedAt: time.Now().Add(-9 * time.Second)}
+	rendered := renderWorkingMessage(message, "⣾")
+
+	if plain := ansi.Strip(rendered); !strings.HasPrefix(plain, "⣾ Working") {
+		t.Fatalf("working message did not include spinner frame: %q", plain)
+	}
+	hint := lipgloss.NewStyle().Foreground(lipgloss.Color(workingHintColor)).Render("(9s · esc to interrupt)")
+	if !strings.Contains(rendered, hint) {
+		t.Fatalf("working hint did not use subdued style: %q", rendered)
+	}
+}
+
+func TestWorkingMessageDisappearsAfterToolRoundResolves(t *testing.T) {
+	m := initialModel()
+	m.resize(80, 12)
+
+	m, _ = updateModel(t, m, replEventMsg{event: repl.Event{Kind: repl.EventStarted, RequestID: 1}})
+	m, _ = updateModel(t, m, replEventMsg{event: repl.Event{Kind: repl.EventToolStarted, RequestID: 1, ToolCallID: "call_1", Content: "Read"}})
+	m, _ = updateModel(t, m, replEventMsg{event: repl.Event{Kind: repl.EventToolCompleted, RequestID: 1, ToolCallID: "call_1", Content: "Read README.md"}})
+	m, _ = updateModel(t, m, replEventMsg{event: repl.Event{Kind: repl.EventChunk, RequestID: 1, Content: "done"}})
+	m, _ = updateModel(t, m, replEventMsg{event: repl.Event{Kind: repl.EventCompleted, RequestID: 1}})
+
+	content := ansi.Strip(m.viewport.GetContent())
+	if strings.Contains(content, "Working") || !strings.Contains(content, "done") {
+		t.Fatalf("resolved tool round rendered unexpected history: %q", content)
+	}
+	for _, message := range m.history {
+		if message.id == 1 && message.role == roleAssistant && message.status == statusActive {
+			t.Fatalf("resolved tool round left active assistant message: %+v", message)
+		}
 	}
 }
 
