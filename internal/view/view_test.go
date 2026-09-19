@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -273,6 +274,63 @@ func TestHistoryPreservesMessageContent(t *testing.T) {
 	}
 }
 
+func TestEmptyAssistantMessagesAreNotRenderedOrExported(t *testing.T) {
+	empty := chatMessage{role: roleAssistant, content: " \n\t", status: statusSucceeded}
+	if rendered := renderHistoryMessage(&empty, 40, &markdownRenderer{}); rendered != "" {
+		t.Fatalf("empty assistant rendered as %q", rendered)
+	}
+
+	content := formatHistory([]chatMessage{
+		{role: roleUser, content: "hello"},
+		empty,
+	})
+	if strings.Contains(content, "## Assistant") {
+		t.Fatalf("empty assistant was exported: %q", content)
+	}
+}
+
+func TestActiveEmptyAssistantShowsWorkingElapsed(t *testing.T) {
+	m := initialModel()
+	m.history = []chatMessage{{
+		role:      roleAssistant,
+		status:    statusActive,
+		startedAt: time.Now().Add(-9 * time.Second),
+	}}
+	m.resize(80, 10)
+
+	content := ansi.Strip(m.viewport.GetContent())
+	if !strings.Contains(content, "Working (9s · esc to interrupt)") {
+		t.Fatalf("working message = %q", content)
+	}
+}
+
+func TestExploratoryToolsRenderAsExploreGroup(t *testing.T) {
+	m := initialModel()
+	m.history = []chatMessage{
+		{role: roleUser, content: "inspect the project"},
+		{role: roleTool, toolName: "Read", content: "Read README.md", status: statusSucceeded},
+		{role: roleTool, toolName: "Grep", content: "Found 3 matches", status: statusSucceeded},
+		{role: roleTool, toolName: "Glob", content: "Found 25 files", status: statusSucceeded},
+		{role: roleAssistant, content: "Here is what I found.", status: statusSucceeded},
+	}
+	m.resize(80, 14)
+
+	content := ansi.Strip(m.viewport.GetContent())
+	if strings.Count(content, exploreLabel) != 1 {
+		t.Fatalf("Explore group count = %d in %q", strings.Count(content, exploreLabel), content)
+	}
+	for _, expected := range []string{
+		"• Explore",
+		"  • Read README.md",
+		"  • Found 3 matches",
+		"  • Found 25 files",
+	} {
+		if !strings.Contains(content, expected) {
+			t.Fatalf("grouped history missing %q: %q", expected, content)
+		}
+	}
+}
+
 func TestMarkdownRendererDoesNotPrefixBlankLine(t *testing.T) {
 	formatted, err := (&markdownRenderer{}).render("response", 40)
 	if err != nil {
@@ -443,6 +501,7 @@ func TestToolHistoryPreservesRoundOrderAndFailure(t *testing.T) {
 	m.resize(60, 20)
 
 	m, _ = updateModel(t, m, replEventMsg{event: repl.Event{Kind: repl.EventStarted, RequestID: 1}})
+	startedAt := m.history[0].startedAt
 	m, _ = updateModel(t, m, replEventMsg{event: repl.Event{Kind: repl.EventChunk, RequestID: 1, Content: "before"}})
 	m, _ = updateModel(t, m, replEventMsg{event: repl.Event{Kind: repl.EventToolStarted, RequestID: 1, ToolCallID: "call_1", Content: "Read"}})
 	if len(m.history) != 2 || m.history[1].role != roleTool || m.history[1].status != statusActive || m.history[1].content != "Read" {
@@ -462,6 +521,9 @@ func TestToolHistoryPreservesRoundOrderAndFailure(t *testing.T) {
 	}
 	if m.history[0].content != "before" || m.history[2].content != "after" {
 		t.Fatalf("assistant history = %+v", m.history)
+	}
+	if !m.history[2].startedAt.Equal(startedAt) {
+		t.Fatalf("post-tool assistant start time = %v, want %v", m.history[2].startedAt, startedAt)
 	}
 }
 

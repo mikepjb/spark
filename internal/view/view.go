@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/cursor"
 	"charm.land/bubbles/v2/help"
@@ -37,6 +38,7 @@ const (
 	roleUser              = "user"
 	roleAssistant         = "assistant"
 	roleTool              = "tool"
+	exploreLabel          = "Explore"
 )
 
 type messageStatus uint8
@@ -83,8 +85,10 @@ type chatMessage struct {
 	id                   uint64
 	role                 string
 	toolID               string
+	toolName             string
 	content              string
 	status               messageStatus
+	startedAt            time.Time
 	renderedContent      string
 	renderedContentWidth int
 	renderedContentValid bool
@@ -304,6 +308,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
+		m.refreshHistory(false)
 		return m, cmd
 
 	case tea.MouseWheelMsg:
@@ -405,7 +410,12 @@ func (m *model) handleReplEvent(event repl.Event) tea.Cmd {
 			m.queued--
 		}
 		m.activeID = event.RequestID
-		m.history = append(m.history, chatMessage{id: event.RequestID, role: roleAssistant, status: statusActive})
+		m.history = append(m.history, chatMessage{
+			id:        event.RequestID,
+			role:      roleAssistant,
+			status:    statusActive,
+			startedAt: time.Now(),
+		})
 		m.refreshHistory(true)
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(m.spinner.Tick())
@@ -445,11 +455,12 @@ func (m *model) handleReplEvent(event repl.Event) tea.Cmd {
 		}
 	case repl.EventToolStarted:
 		m.history = append(m.history, chatMessage{
-			id:      event.RequestID,
-			role:    roleTool,
-			toolID:  event.ToolCallID,
-			content: event.Content,
-			status:  statusActive,
+			id:       event.RequestID,
+			role:     roleTool,
+			toolID:   event.ToolCallID,
+			toolName: event.Content,
+			content:  event.Content,
+			status:   statusActive,
 		})
 		m.refreshHistory(true)
 	case repl.EventToolCompleted:
@@ -491,7 +502,19 @@ func (m *model) assistantMessageForChunk(id uint64) *chatMessage {
 		case roleAssistant:
 			return &m.history[i]
 		case roleTool:
-			m.history = append(m.history, chatMessage{id: id, role: roleAssistant, status: statusActive})
+			startedAt := time.Now()
+			for j := len(m.history) - 1; j >= 0; j-- {
+				if m.history[j].id == id && m.history[j].role == roleAssistant && !m.history[j].startedAt.IsZero() {
+					startedAt = m.history[j].startedAt
+					break
+				}
+			}
+			m.history = append(m.history, chatMessage{
+				id:        id,
+				role:      roleAssistant,
+				status:    statusActive,
+				startedAt: startedAt,
+			})
 			return &m.history[len(m.history)-1]
 		}
 	}
@@ -547,8 +570,23 @@ func (m *model) refreshHistory(forceBottom bool) {
 	atBottom := forceBottom || m.viewport.AtBottom()
 
 	var messages []string
-	for i := range m.history {
-		messages = append(messages, renderHistoryMessage(&m.history[i], m.viewport.Width(), &m.markdown))
+	for i := 0; i < len(m.history); {
+		if isExploratoryTool(m.history[i]) {
+			end := i + 1
+			for end < len(m.history) && isExploratoryTool(m.history[end]) {
+				end++
+			}
+			if rendered := renderExploreGroup(m.history[i:end], m.viewport.Width(), &m.markdown); rendered != "" {
+				messages = append(messages, rendered)
+			}
+			i = end
+			continue
+		}
+
+		if rendered := renderHistoryMessage(&m.history[i], m.viewport.Width(), &m.markdown); rendered != "" {
+			messages = append(messages, rendered)
+		}
+		i++
 	}
 
 	content := strings.Join(messages, "\n\n")
@@ -559,6 +597,14 @@ func (m *model) refreshHistory(forceBottom bool) {
 }
 
 func renderHistoryMessage(message *chatMessage, width int, markdown *markdownRenderer) string {
+	return renderHistoryMessageWithIndent(message, width, markdown, "")
+}
+
+func renderHistoryMessageWithIndent(message *chatMessage, width int, markdown *markdownRenderer, indent string) string {
+	if message.role == roleAssistant && strings.TrimSpace(message.content) == "" && message.status != statusActive {
+		return ""
+	}
+
 	marker, markerColor := messageMarker(*message)
 	contentColor := "252"
 	if message.role == roleUser {
@@ -567,9 +613,11 @@ func renderHistoryMessage(message *chatMessage, width int, markdown *markdownRen
 
 	markerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(markerColor))
 	contentStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(contentColor))
-	contentWidth := atLeastOne(width - lipgloss.Width(historyContentIndent))
+	contentWidth := atLeastOne(width - lipgloss.Width(indent) - lipgloss.Width(historyContentIndent))
 	var lines []string
-	if message.role == roleAssistant {
+	if message.role == roleAssistant && strings.TrimSpace(message.content) == "" {
+		lines = []string{contentStyle.Render(workingMessage(*message))}
+	} else if message.role == roleAssistant {
 		if !message.renderedContentValid || message.renderedContentWidth != contentWidth {
 			formatted, err := markdown.render(message.content, contentWidth)
 			if err != nil {
@@ -586,9 +634,9 @@ func renderHistoryMessage(message *chatMessage, width int, markdown *markdownRen
 	}
 	rendered := make([]string, len(lines))
 	for i, line := range lines {
-		prefix := historyContentIndent
+		prefix := indent + historyContentIndent
 		if i == 0 {
-			prefix = markerStyle.Render(marker) + " "
+			prefix = indent + markerStyle.Render(marker) + " "
 		}
 		if message.role == roleAssistant {
 			rendered[i] = prefix + line
@@ -598,6 +646,73 @@ func renderHistoryMessage(message *chatMessage, width int, markdown *markdownRen
 	}
 
 	return strings.Join(rendered, "\n")
+}
+
+func renderExploreGroup(messages []chatMessage, width int, markdown *markdownRenderer) string {
+	if len(messages) == 0 {
+		return ""
+	}
+
+	marker, markerColor := messageMarker(chatMessage{role: roleAssistant, status: exploreGroupStatus(messages)})
+	markerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(markerColor))
+	contentStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
+	lines := []string{markerStyle.Render(marker) + " " + contentStyle.Render(exploreLabel)}
+	for i := range messages {
+		if rendered := renderHistoryMessageWithIndent(&messages[i], width, markdown, historyContentIndent); rendered != "" {
+			lines = append(lines, rendered)
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+func exploreGroupStatus(messages []chatMessage) messageStatus {
+	status := statusSucceeded
+	for _, message := range messages {
+		switch message.status {
+		case statusActive:
+			return statusActive
+		case statusFailed:
+			status = statusFailed
+		case statusCancelled:
+			if status != statusFailed {
+				status = statusCancelled
+			}
+		}
+	}
+	return status
+}
+
+func isExploratoryTool(message chatMessage) bool {
+	if message.role != roleTool {
+		return false
+	}
+
+	toolName := message.toolName
+	if toolName == "" {
+		fields := strings.Fields(message.content)
+		if len(fields) == 0 {
+			return false
+		}
+		toolName = fields[0]
+	}
+
+	switch toolName {
+	case "Read", "Glob", "Grep", "GitStatus", "GitDiff", "GitLog", "GitShow":
+		return true
+	default:
+		return false
+	}
+}
+
+func workingMessage(message chatMessage) string {
+	seconds := 0
+	if !message.startedAt.IsZero() {
+		elapsed := time.Since(message.startedAt)
+		if elapsed > 0 {
+			seconds = int(elapsed / time.Second)
+		}
+	}
+	return fmt.Sprintf("Working (%ds · esc to interrupt)", seconds)
 }
 
 func messageMarker(message chatMessage) (string, string) {

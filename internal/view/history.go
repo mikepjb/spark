@@ -52,6 +52,9 @@ func formatHistory(history []chatMessage) string {
 	builder.WriteString("# Spark message history\n")
 
 	for _, message := range history {
+		if message.role == roleAssistant && strings.TrimSpace(message.content) == "" {
+			continue
+		}
 		builder.WriteString("\n## ")
 		builder.WriteString(historyRoleLabel(message.role))
 		builder.WriteString("\n\n")
