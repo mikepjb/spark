@@ -76,6 +76,7 @@ type Coordinator struct {
 	mu           sync.Mutex
 	queue        []request
 	transcript   []llm.Message
+	apiHistory   []llm.Request
 	activeCancel context.CancelFunc
 	closed       bool
 
@@ -263,13 +264,15 @@ func (c *Coordinator) process(req request, ctx context.Context) {
 
 	var intermediate []llm.Message
 	for round := 0; ; round++ {
-		stream, err := client.Complete(ctx, llm.Request{
+		completionRequest := llm.Request{
 			Model:         model,
 			Messages:      messages,
 			Stream:        true,
 			Tools:         toolDefinitions(c.config.Tools),
 			StreamOptions: &llm.StreamOptions{IncludeUsage: true},
-		})
+		}
+		c.recordAPIRequest(completionRequest)
+		stream, err := client.Complete(ctx, completionRequest)
 		if err != nil {
 			if errors.Is(ctx.Err(), context.Canceled) {
 				c.emit(Event{Kind: EventCancelled, RequestID: req.id})
@@ -313,6 +316,50 @@ func (c *Coordinator) process(req request, ctx context.Context) {
 			intermediate = append(intermediate, toolMessage)
 		}
 	}
+}
+
+func (c *Coordinator) APIHistory() []llm.Request {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	history := make([]llm.Request, len(c.apiHistory))
+	for i, request := range c.apiHistory {
+		history[i] = cloneRequest(request)
+	}
+	return history
+}
+
+func (c *Coordinator) recordAPIRequest(request llm.Request) {
+	c.mu.Lock()
+	c.apiHistory = append(c.apiHistory, cloneRequest(request))
+	c.mu.Unlock()
+}
+
+func cloneRequest(request llm.Request) llm.Request {
+	clone := request
+	clone.Messages = make([]llm.Message, len(request.Messages))
+	for i, message := range request.Messages {
+		clone.Messages[i] = message
+		if message.Content != nil {
+			content := *message.Content
+			clone.Messages[i].Content = &content
+		}
+		if message.ToolCalls != nil {
+			clone.Messages[i].ToolCalls = append([]llm.AssistantToolCall(nil), message.ToolCalls...)
+		}
+	}
+	if request.Tools != nil {
+		clone.Tools = make([]llm.ToolDefinition, len(request.Tools))
+		for i, tool := range request.Tools {
+			clone.Tools[i] = tool
+			clone.Tools[i].Function.Parameters = append(json.RawMessage(nil), tool.Function.Parameters...)
+		}
+	}
+	if request.StreamOptions != nil {
+		options := *request.StreamOptions
+		clone.StreamOptions = &options
+	}
+	return clone
 }
 
 func withSkills(content string, skills []SkillUse) string {

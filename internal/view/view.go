@@ -15,12 +15,14 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/mikepjb/spark/internal/commands"
+	"github.com/mikepjb/spark/internal/llm"
 	"github.com/mikepjb/spark/internal/repl"
 )
 
 type Backend interface {
 	Submit(string) (uint64, error)
 	Events() <-chan repl.Event
+	APIHistory() []llm.Request
 	Cancel()
 	Close()
 }
@@ -31,7 +33,7 @@ type submissionBackend interface {
 
 const (
 	maxInputHeight        = 6
-	historyExportFilename = "spark-history.md"
+	historyExportFilename = "debug.log"
 	roleUser              = "user"
 	roleAssistant         = "assistant"
 	roleTool              = "tool"

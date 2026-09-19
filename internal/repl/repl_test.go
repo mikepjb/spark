@@ -75,6 +75,14 @@ func (s *deltaStream) Next() (llm.Delta, error) {
 
 func (s *deltaStream) Close() error { return nil }
 
+type errorStream struct {
+	err error
+}
+
+func (s *errorStream) Next() (llm.Delta, error) { return llm.Delta{}, s.err }
+
+func (s *errorStream) Close() error { return nil }
+
 type blockingStream struct {
 	started chan struct{}
 	ctx     context.Context
@@ -306,6 +314,32 @@ func TestCoordinatorExecutesToolCallsAndContinuesConversation(t *testing.T) {
 	}
 	if request.Messages[3].Role != "tool" || request.Messages[3].ToolCallID != "call_1" || request.Messages[3].Content == nil || *request.Messages[3].Content != "tool result" {
 		t.Fatalf("tool result message = %+v", request.Messages[3])
+	}
+
+	apiHistory := coordinator.APIHistory()
+	if len(apiHistory) != 2 {
+		t.Fatalf("API history length = %d, want 2", len(apiHistory))
+	}
+	if len(apiHistory[1].Messages) != 4 || apiHistory[1].Messages[2].ToolCalls[0].Function.Arguments != `{"filePath":"notes.txt"}` {
+		t.Fatalf("second API request = %+v", apiHistory[1])
+	}
+}
+
+func TestCoordinatorRecordsAPIRequestBeforeStreamFailure(t *testing.T) {
+	client := newFakeClient()
+	client.streams <- &errorStream{err: errors.New("inference failed")}
+	coordinator := New(client, Config{Model: "test-model"})
+	defer coordinator.Close()
+
+	id, err := coordinator.Submit("inspect this")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitForEvent(t, coordinator.Events(), EventFailed, id)
+
+	history := coordinator.APIHistory()
+	if len(history) != 1 || len(history[0].Messages) != 1 || history[0].Messages[0].Content == nil || *history[0].Messages[0].Content != "inspect this" {
+		t.Fatalf("API history = %+v", history)
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/mikepjb/spark/internal/commands"
+	"github.com/mikepjb/spark/internal/llm"
 	"github.com/mikepjb/spark/internal/repl"
 )
 
@@ -285,8 +286,18 @@ func TestMarkdownRendererDoesNotPrefixBlankLine(t *testing.T) {
 	}
 }
 
-func TestSaveHistoryWritesRawMarkdownAndReportsSuccess(t *testing.T) {
-	m := initialModel()
+func TestSaveHistoryWritesChatAndAPIHistory(t *testing.T) {
+	backend := &fakeBackend{
+		events: make(chan repl.Event),
+		apiHistory: []llm.Request{{
+			Model: "test-model",
+			Messages: []llm.Message{{
+				Role:    "user",
+				Content: llm.StringContent("inspect README.md"),
+			}},
+		}},
+	}
+	m := newModel(backend, "test-model")
 	m.historyFilePath = filepath.Join(t.TempDir(), historyExportFilename)
 	m.history = []chatMessage{
 		{role: roleUser, content: "inspect this"},
@@ -300,11 +311,20 @@ func TestSaveHistoryWritesRawMarkdownAndReportsSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read exported history: %v", err)
 	}
-	want := "# Spark message history\n\n## User\n\ninspect this\n\n## Assistant\n\n```go\nfmt.Println(\"hi\")\n```\n\n## Tool\n\nRead notes.txt\n"
-	if got := string(data); got != want {
-		t.Fatalf("exported history = %q, want %q", got, want)
+	content := string(data)
+	for _, expected := range []string{
+		"# Spark message history",
+		"## Tool\n\nRead notes.txt",
+		"## API requests",
+		"### Request 1",
+		`"model": "test-model"`,
+		`"inspect README.md"`,
+	} {
+		if !strings.Contains(content, expected) {
+			t.Fatalf("exported debug log = %q, missing %q", content, expected)
+		}
 	}
-	if m.notice != "history saved to "+historyExportFilename {
+	if m.notice != "history saved to debug.log" {
 		t.Fatalf("notice = %q", m.notice)
 	}
 }
@@ -446,11 +466,12 @@ func TestToolHistoryPreservesRoundOrderAndFailure(t *testing.T) {
 }
 
 type fakeBackend struct {
-	events    chan repl.Event
-	submitID  uint64
-	submitErr error
-	cancelled int
-	closed    bool
+	events     chan repl.Event
+	apiHistory []llm.Request
+	submitID   uint64
+	submitErr  error
+	cancelled  int
+	closed     bool
 }
 
 func (b *fakeBackend) Submit(string) (uint64, error) {
@@ -458,6 +479,8 @@ func (b *fakeBackend) Submit(string) (uint64, error) {
 }
 
 func (b *fakeBackend) Events() <-chan repl.Event { return b.events }
+
+func (b *fakeBackend) APIHistory() []llm.Request { return b.apiHistory }
 
 func (b *fakeBackend) Cancel() { b.cancelled++ }
 
