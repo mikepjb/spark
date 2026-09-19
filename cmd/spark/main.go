@@ -79,7 +79,7 @@ func main() {
 		}
 		return choice.Model, nil
 	})
-	if err := view.Start(coordinator, currentModel.Model, cfg.ContextLimit, commandEngine); err != nil {
+	if err := view.Start(coordinator, currentModel.Model, cfg.ContextLimit, commandEngine, workspace); err != nil {
 		fmt.Fprintf(os.Stderr, "Alas, there's been an error: %v\n", err)
 		os.Exit(1)
 	}
@@ -103,6 +103,8 @@ func skillRoots(workspace string, configured []string) ([]string, error) {
 	}
 	return []string{
 		filepath.Join(workspace, ".agents", "skills"),
+		filepath.Join(workspace, ".agent", "skills"),
 		filepath.Join(home, ".agents", "skills"),
+		filepath.Join(home, ".agent", "skills"),
 	}, nil
 }

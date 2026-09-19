@@ -1,6 +1,8 @@
 package view
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -26,6 +28,8 @@ func press(name string) tea.KeyPressMsg {
 		return tea.KeyPressMsg(tea.Key{Code: ',', Mod: tea.ModCtrl})
 	case "ctrl+c":
 		return tea.KeyPressMsg(tea.Key{Code: 'c', Mod: tea.ModCtrl})
+	case "ctrl+x":
+		return tea.KeyPressMsg(tea.Key{Code: 'x', Mod: tea.ModCtrl})
 	case "?":
 		return tea.KeyPressMsg(tea.Key{Code: '?', Text: "?"})
 	default:
@@ -264,6 +268,41 @@ func TestHistoryPreservesMessageContent(t *testing.T) {
 	content := m.viewport.GetContent()
 	if !strings.Contains(content, "welcome") || !strings.Contains(content, "hello") {
 		t.Fatalf("history content was not rendered: %q", content)
+	}
+}
+
+func TestSaveHistoryWritesRawMarkdownAndReportsSuccess(t *testing.T) {
+	m := initialModel()
+	m.historyFilePath = filepath.Join(t.TempDir(), historyExportFilename)
+	m.history = []chatMessage{
+		{role: roleUser, content: "inspect this"},
+		{role: roleAssistant, content: "```go\nfmt.Println(\"hi\")\n```", status: statusSucceeded},
+		{role: roleTool, content: "Read notes.txt", status: statusFailed},
+	}
+
+	m, _ = updateModel(t, m, press("ctrl+x"))
+
+	data, err := os.ReadFile(m.historyFilePath)
+	if err != nil {
+		t.Fatalf("read exported history: %v", err)
+	}
+	want := "# Spark message history\n\n## User\n\ninspect this\n\n## Assistant\n\n```go\nfmt.Println(\"hi\")\n```\n\n## Tool\n\nRead notes.txt\n"
+	if got := string(data); got != want {
+		t.Fatalf("exported history = %q, want %q", got, want)
+	}
+	if m.notice != "history saved to "+historyExportFilename {
+		t.Fatalf("notice = %q", m.notice)
+	}
+}
+
+func TestSaveHistoryReportsWriteFailure(t *testing.T) {
+	m := initialModel()
+	m.historyFilePath = filepath.Join(t.TempDir(), "missing", historyExportFilename)
+
+	m, _ = updateModel(t, m, press("ctrl+x"))
+
+	if !strings.Contains(m.notice, "save history:") {
+		t.Fatalf("notice = %q, want save error", m.notice)
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -135,7 +136,7 @@ func TestCoordinatorStreamsAndBuildsConversationHistory(t *testing.T) {
 	}
 }
 
-func TestCoordinatorActivatesSkillsWithoutDuplicatingDefinitions(t *testing.T) {
+func TestCoordinatorActivatesSkillsForOneRequest(t *testing.T) {
 	client := newFakeClient()
 	client.streams <- &fakeStream{deltas: []string{"done"}}
 	client.streams <- &fakeStream{deltas: []string{"again"}}
@@ -151,6 +152,10 @@ func TestCoordinatorActivatesSkillsWithoutDuplicatingDefinitions(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitForEvent(t, coordinator.Events(), EventCompleted, firstID)
+	firstRequest := client.request(0)
+	if len(firstRequest.Messages) != 4 || firstRequest.Messages[1].Content == nil || !strings.Contains(*firstRequest.Messages[1].Content, "Use evidence.") || firstRequest.Messages[2].Content == nil || !strings.Contains(*firstRequest.Messages[2].Content, "read-only policy") {
+		t.Fatalf("first request messages = %+v", firstRequest.Messages)
+	}
 
 	secondID, err := coordinator.Submit("next")
 	if err != nil {
@@ -159,8 +164,13 @@ func TestCoordinatorActivatesSkillsWithoutDuplicatingDefinitions(t *testing.T) {
 	waitForEvent(t, coordinator.Events(), EventCompleted, secondID)
 
 	request := client.request(1)
-	if len(request.Messages) != 5 || request.Messages[1].Content == nil || *request.Messages[1].Content != "Use evidence." {
+	if len(request.Messages) != 4 {
 		t.Fatalf("second request messages = %+v", request.Messages)
+	}
+	for _, message := range request.Messages {
+		if message.Content != nil && strings.Contains(*message.Content, "Use evidence.") {
+			t.Fatalf("skill body persisted into second request: %+v", request.Messages)
+		}
 	}
 }
 

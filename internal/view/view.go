@@ -2,6 +2,7 @@ package view
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"charm.land/bubbles/v2/cursor"
@@ -29,10 +30,11 @@ type submissionBackend interface {
 }
 
 const (
-	maxInputHeight = 6
-	roleUser       = "user"
-	roleAssistant  = "assistant"
-	roleTool       = "tool"
+	maxInputHeight        = 6
+	historyExportFilename = "spark-history.md"
+	roleUser              = "user"
+	roleAssistant         = "assistant"
+	roleTool              = "tool"
 )
 
 type messageStatus uint8
@@ -105,6 +107,7 @@ type keyMap struct {
 	CompletionAccept key.Binding
 	ScrollUp         key.Binding
 	ScrollDown       key.Binding
+	SaveHistory      key.Binding
 }
 
 func newKeyMap() keyMap {
@@ -153,6 +156,10 @@ func newKeyMap() keyMap {
 			key.WithKeys("pgdown", "ctrl+down"),
 			key.WithHelp("pgdn/ctrl+↓", "history down"),
 		),
+		SaveHistory: key.NewBinding(
+			key.WithKeys("ctrl+x"),
+			key.WithHelp("ctrl+x", "save history"),
+		),
 	}
 }
 
@@ -163,7 +170,7 @@ func (k keyMap) ShortHelp() []key.Binding {
 func (k keyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Submit, k.InsertNewline, k.Help, k.Settings},
-		{k.ScrollUp, k.ScrollDown, k.Close, k.Quit},
+		{k.ScrollUp, k.ScrollDown, k.SaveHistory, k.Close, k.Quit},
 	}
 }
 
@@ -175,23 +182,24 @@ type model struct {
 	help     help.Model
 	keys     keyMap
 
-	busy          bool
-	queued        int
-	cancelConfirm bool
-	showHelp      bool
-	showSettings  bool
-	notice        string
-	activeID      uint64
-	modelName     string
-	contextUsed   int
-	contextLimit  int
-	windowWidth   int
-	windowHeight  int
-	markdown      markdownRenderer
-	backend       Backend
-	commands      *commands.Engine
-	completion    commands.Completion
-	completionIdx int
+	busy            bool
+	queued          int
+	cancelConfirm   bool
+	showHelp        bool
+	showSettings    bool
+	notice          string
+	activeID        uint64
+	modelName       string
+	contextUsed     int
+	contextLimit    int
+	windowWidth     int
+	windowHeight    int
+	markdown        markdownRenderer
+	backend         Backend
+	commands        *commands.Engine
+	completion      commands.Completion
+	completionIdx   int
+	historyFilePath string
 }
 
 func inputStyles() textarea.Styles {
@@ -250,11 +258,12 @@ func newModel(backend Backend, modelName string, commandEngines ...*commands.Eng
 	}
 }
 
-func Start(backend Backend, modelName string, contextLimit int, commandEngine *commands.Engine) error {
+func Start(backend Backend, modelName string, contextLimit int, commandEngine *commands.Engine, workspace string) error {
 	if backend != nil {
 		defer backend.Close()
 	}
 	m := newModel(backend, modelName, commandEngine)
+	m.historyFilePath = filepath.Join(workspace, historyExportFilename)
 	if contextLimit > 0 {
 		// The first context event will refresh this value with the server's
 		// observed usage while the configured limit is useful immediately.

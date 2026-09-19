@@ -98,6 +98,15 @@ func (m model) handleKeyPress(msg tea.KeyPressMsg) (model, tea.Cmd, bool) {
 		return m, nil, true
 	}
 
+	if key.Matches(msg, m.keys.SaveHistory) {
+		if err := m.saveHistory(); err != nil {
+			m.notice = err.Error()
+		} else {
+			m.notice = "history saved to " + historyExportFilename
+		}
+		return m, nil, true
+	}
+
 	if key.Matches(msg, m.keys.ScrollUp) || key.Matches(msg, m.keys.ScrollDown) {
 		m.viewport, _ = m.viewport.Update(msg)
 		return m, nil, true

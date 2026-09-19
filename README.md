@@ -8,7 +8,7 @@ running comfortably on a consumer laptop.
 ## Features to be implemented
 
 - /model be able to switch between llama.cpp qwen and openai/fireworks
-- skill use /analyse etc
+- explicit skill use with `/analyse` and `$analyse`
 - consider integrating LSPs for core langs go/java/typescript/python to help
   extend the abilities of a small qwen 3.5 2b model where it may be missing
   knowledge about specific libraries but can still find code to navigate
@@ -18,6 +18,12 @@ running comfortably on a consumer laptop.
 - @ to address files with fuzzy search interface
 - count context in k/1000s, with color coding i.e red over 100k
 - make sure we are printing feedback in the UI when tool calls are being used
+- display issue, there is no 'in-progress' display in the history for when the
+  LLM is inferencing or 'thinking'
+- display issue, currently llm output in the history seems to have an empty line
+  at the beginning - not sure if that's a parsing issue or what's going on
+  there.
+- Read/Grep etc combine into a Explored phase visually
 
 ## How this might be useful
 
@@ -81,7 +87,6 @@ Spark will not initially provide:
 
 - saving/exporting output to disk, though when a plan is generated or something
   that you want to review later this would be handy!
-- skills, though this needs to come soon as grill-me is great!
 - arbitrary shell or code execution;
 - file writes, edits, or deletes;
 - management or downloading of LLM servers/models;
@@ -89,6 +94,31 @@ Spark will not initially provide:
 
 The repository is currently a project scaffold; the architecture above
 describes the intended direction rather than implemented functionality.
+
+## Skills
+
+Spark supports explicit Agent Skills. Skills are directories containing a
+`SKILL.md` file with YAML front matter and Markdown instructions.
+
+Use a skill at the start of a request with `/skill-name`, or reference it
+inline with `$skill-name`:
+
+```text
+/analyse inspect the repository's configuration
+inspect the repository's configuration using $analyse
+```
+
+By default Spark searches these roots in order:
+
+- `.agents/skills`
+- `.agent/skills`
+- `~/.agents/skills`
+- `~/.agent/skills`
+
+The `skill_paths` setting in `.sparkrc` replaces these defaults. Skills are
+loaded only for the request that explicitly references them. Spark does not
+automatically select skills or execute scripts bundled with them. Skill
+instructions cannot expand Spark's read-only capabilities.
 
 ## Target languages
 
