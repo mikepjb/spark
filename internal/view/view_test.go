@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/mikepjb/spark/internal/commands"
 	"github.com/mikepjb/spark/internal/repl"
 )
@@ -278,6 +279,9 @@ func TestMarkdownRendererDoesNotPrefixBlankLine(t *testing.T) {
 	}
 	if strings.HasPrefix(formatted, "\n") {
 		t.Fatalf("rendered Markdown started with a blank line: %q", formatted)
+	}
+	if plain := ansi.Strip(formatted); strings.HasPrefix(plain, "  ") {
+		t.Fatalf("rendered Markdown started with a two-space margin: %q", plain)
 	}
 }
 

@@ -15,6 +15,7 @@ func (r *markdownRenderer) render(content string, width int) (string, error) {
 	if r.term == nil || r.width != width {
 		style := styles.DarkStyleConfig
 		style.Document.StylePrimitive.BlockPrefix = ""
+		style.Document.Margin = nil
 		term, err := glamour.NewTermRenderer(
 			glamour.WithStyles(style),
 			glamour.WithWordWrap(width),
