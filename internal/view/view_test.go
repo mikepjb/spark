@@ -237,6 +237,48 @@ func TestHistoryPreservesMessageContent(t *testing.T) {
 	}
 }
 
+func TestStreamingMarkdownReparsesAccumulatedContent(t *testing.T) {
+	m := initialModel()
+	m.resize(80, 20)
+	m.history = []chatMessage{
+		{id: 1, role: roleAssistant, status: statusActive},
+	}
+
+	m, _ = updateModel(t, m, replEventMsg{event: repl.Event{
+		Kind:      repl.EventChunk,
+		RequestID: 1,
+		Content:   "# Heading\n\nThis is **bo",
+	}})
+	partial := m.viewport.GetContent()
+	if !strings.Contains(partial, "Heading") || !strings.Contains(partial, "This is") {
+		t.Fatalf("partial Markdown was not visible: %q", partial)
+	}
+
+	m, _ = updateModel(t, m, replEventMsg{event: repl.Event{
+		Kind:      repl.EventChunk,
+		RequestID: 1,
+		Content:   "ld** with code:\n\n```go\nfmt.Println(\"hi\")\n",
+	}})
+	m, _ = updateModel(t, m, replEventMsg{event: repl.Event{
+		Kind:      repl.EventChunk,
+		RequestID: 1,
+		Content:   "```",
+	}})
+
+	content := m.viewport.GetContent()
+	if strings.Contains(content, "**bold**") || strings.Contains(content, "```go") {
+		t.Fatalf("completed Markdown syntax was not rendered: %q", content)
+	}
+	for _, expected := range []string{"Heading", "bold", "fmt", "Println", "hi"} {
+		if !strings.Contains(content, expected) {
+			t.Fatalf("rendered Markdown did not contain %q: %q", expected, content)
+		}
+	}
+	if !strings.Contains(m.history[0].content, "```go\nfmt.Println") {
+		t.Fatalf("raw accumulated Markdown was not preserved: %q", m.history[0].content)
+	}
+}
+
 func TestStatusShowsBusySpinnerAndContext(t *testing.T) {
 	m := initialModel()
 	m.busy = true

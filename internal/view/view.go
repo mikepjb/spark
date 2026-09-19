@@ -70,10 +70,13 @@ var (
 )
 
 type chatMessage struct {
-	id      uint64
-	role    string
-	content string
-	status  messageStatus
+	id                   uint64
+	role                 string
+	content              string
+	status               messageStatus
+	renderedContent      string
+	renderedContentWidth int
+	renderedContentValid bool
 }
 
 type replEventMsg struct {
@@ -165,6 +168,7 @@ type model struct {
 	contextLimit  int
 	windowWidth   int
 	windowHeight  int
+	markdown      markdownRenderer
 	backend       Backend
 }
 
@@ -369,7 +373,10 @@ func (m *model) handleReplEvent(event repl.Event) tea.Cmd {
 		return cmd
 	case repl.EventChunk:
 		if message := m.messageByID(event.RequestID, roleAssistant); message != nil {
+			// Chunks may end inside any Markdown construct; always re-render the
+			// accumulated source so later chunks can close it correctly.
 			message.content += event.Content
+			message.renderedContentValid = false
 			m.refreshHistory(true)
 		}
 	case repl.EventCompleted:
@@ -425,6 +432,7 @@ func (m *model) finishMessage(id uint64, status messageStatus, errorText string)
 	}
 	message.status = status
 	if errorText != "" {
+		message.renderedContentValid = false
 		if message.content != "" {
 			message.content += "\n\n"
 		}
@@ -455,8 +463,8 @@ func (m *model) refreshHistory(forceBottom bool) {
 	atBottom := forceBottom || m.viewport.AtBottom()
 
 	var messages []string
-	for _, message := range m.history {
-		messages = append(messages, renderHistoryMessage(message, m.viewport.Width()))
+	for i := range m.history {
+		messages = append(messages, renderHistoryMessage(&m.history[i], m.viewport.Width(), &m.markdown))
 	}
 
 	content := strings.Join(messages, "\n\n")
@@ -466,8 +474,8 @@ func (m *model) refreshHistory(forceBottom bool) {
 	}
 }
 
-func renderHistoryMessage(message chatMessage, width int) string {
-	marker, markerColor := messageMarker(message)
+func renderHistoryMessage(message *chatMessage, width int, markdown *markdownRenderer) string {
+	marker, markerColor := messageMarker(*message)
 	contentColor := "252"
 	if message.role == roleUser {
 		contentColor = userMarkerColor
@@ -476,14 +484,33 @@ func renderHistoryMessage(message chatMessage, width int) string {
 	markerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(markerColor))
 	contentStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(contentColor))
 	contentWidth := atLeastOne(width - lipgloss.Width(historyContentIndent))
-	lines := strings.Split(lipgloss.Wrap(message.content, contentWidth, ""), "\n")
+	var lines []string
+	if message.role == roleAssistant {
+		if !message.renderedContentValid || message.renderedContentWidth != contentWidth {
+			formatted, err := markdown.render(message.content, contentWidth)
+			if err != nil {
+				formatted = lipgloss.Wrap(message.content, contentWidth, "")
+			}
+			formatted = strings.TrimSuffix(formatted, "\n")
+			message.renderedContent = formatted
+			message.renderedContentWidth = contentWidth
+			message.renderedContentValid = true
+		}
+		lines = strings.Split(message.renderedContent, "\n")
+	} else {
+		lines = strings.Split(lipgloss.Wrap(message.content, contentWidth, ""), "\n")
+	}
 	rendered := make([]string, len(lines))
 	for i, line := range lines {
 		prefix := historyContentIndent
 		if i == 0 {
 			prefix = markerStyle.Render(marker) + " "
 		}
-		rendered[i] = prefix + contentStyle.Render(line)
+		if message.role == roleAssistant {
+			rendered[i] = prefix + line
+		} else {
+			rendered[i] = prefix + contentStyle.Render(line)
+		}
 	}
 
 	return strings.Join(rendered, "\n")

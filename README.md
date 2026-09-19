@@ -18,6 +18,7 @@ running comfortably on a consumer laptop.
   questions about 3rd party code.
 - allow configuration of specific llm parameters so we can adjust the model as
   described by unsloth team (https://unsloth.ai/docs/models/qwen3.5#qwen3.5-small-0.8b-2b-4b-9b)
+- @ to address files with fuzzy search interface
 
 ## How this might be useful
 
