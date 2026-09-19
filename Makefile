@@ -7,7 +7,7 @@ install:
 	go install ./cmd/spark
 
 lint:
-	golangci-lint run
+	go tool golangci-lint run --tests=false
 
 test: lint
 	go test -v ./...

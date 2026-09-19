@@ -37,6 +37,10 @@ func updateModel(t *testing.T, m model, msg tea.Msg) (model, tea.Cmd) {
 	return updated.(model), cmd
 }
 
+func initialModel() model {
+	return newModel(nil, "not connected")
+}
+
 func TestInitialModelConfiguresMultilineInput(t *testing.T) {
 	m := initialModel()
 	if len(m.history) != 0 {

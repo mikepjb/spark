@@ -428,12 +428,16 @@ func (r *Registry) readWindow(ctx context.Context, path string, offset, limit in
 	return lines, total, err
 }
 
-func scanLines(ctx context.Context, path string, visit func(int, string) error) error {
+func scanLines(ctx context.Context, path string, visit func(int, string) error) (err error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func() {
+		if closeErr := file.Close(); err == nil {
+			err = closeErr
+		}
+	}()
 	scanner := bufio.NewScanner(file)
 	scanner.Buffer(make([]byte, 64*1024), 2*1024*1024)
 	lineNumber := 0

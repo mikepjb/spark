@@ -63,7 +63,7 @@ func (c *OpenAIClient) Complete(ctx context.Context, request Request) (Stream, e
 		return nil, fmt.Errorf("send completion request: %w", err)
 	}
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		defer response.Body.Close()
+		defer func() { _ = response.Body.Close() }()
 		message, readErr := io.ReadAll(io.LimitReader(response.Body, 64*1024))
 		if readErr != nil {
 			return nil, fmt.Errorf("LLM returned HTTP %d and response could not be read: %w", response.StatusCode, readErr)

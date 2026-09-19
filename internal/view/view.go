@@ -186,10 +186,6 @@ func inputStyles() textarea.Styles {
 	return styles
 }
 
-func initialModel() model {
-	return newModel(nil, "not connected")
-}
-
 func newModel(backend Backend, modelName string) model {
 	keys := newKeyMap()
 	input := textarea.New()

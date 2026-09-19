@@ -16,6 +16,8 @@ running comfortably on a consumer laptop.
   extend the abilities of a small qwen 3.5 2b model where it may be missing
   knowledge about specific libraries but can still find code to navigate
   questions about 3rd party code.
+- allow configuration of specific llm parameters so we can adjust the model as
+  described by unsloth team (https://unsloth.ai/docs/models/qwen3.5#qwen3.5-small-0.8b-2b-4b-9b)
 
 ## How this might be useful
 
