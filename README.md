@@ -7,10 +7,7 @@ running comfortably on a consumer laptop.
 
 ## Features to be implemented
 
-- include golang ci
-- glow based markdown parsing during streaming content?
 - /model be able to switch between llama.cpp qwen and openai/fireworks
-- setup default system prompt (based on consult version)
 - skill use /analyse etc
 - consider integrating LSPs for core langs go/java/typescript/python to help
   extend the abilities of a small qwen 3.5 2b model where it may be missing
@@ -19,6 +16,8 @@ running comfortably on a consumer laptop.
 - allow configuration of specific llm parameters so we can adjust the model as
   described by unsloth team (https://unsloth.ai/docs/models/qwen3.5#qwen3.5-small-0.8b-2b-4b-9b)
 - @ to address files with fuzzy search interface
+- count context in k/1000s, with color coding i.e red over 100k
+- make sure we are printing feedback in the UI when tool calls are being used
 
 ## How this might be useful
 
