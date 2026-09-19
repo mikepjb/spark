@@ -31,7 +31,7 @@
     "type": "function",
     "function": {
       "name": "Glob",
-      "description": "Find workspace files matching a glob pattern.",
+      "description": "Find non-hidden, non-Git-ignored workspace paths matching a glob pattern.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -49,7 +49,7 @@
     "type": "function",
     "function": {
       "name": "Grep",
-      "description": "Search workspace text files with a regular expression.",
+      "description": "Search non-hidden, non-Git-ignored workspace text files with a regular expression.",
       "parameters": {
         "type": "object",
         "properties": {

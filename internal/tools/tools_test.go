@@ -58,6 +58,67 @@ func TestRegistryDefinitionsAndWorkspaceTools(t *testing.T) {
 	}
 }
 
+func TestRegistryDiscoverySkipsHiddenPaths(t *testing.T) {
+	root := t.TempDir()
+	for _, path := range []string{"visible.txt", ".env", ".git/config", "nested/.private/secret.txt"} {
+		full := filepath.Join(root, path)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte("needle\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	registry, err := New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	glob := registry.Execute(context.Background(), call("Glob", `{"pattern":"**/*"}`))
+	if glob.Content != "nested\nvisible.txt" {
+		t.Fatalf("glob result = %q", glob.Content)
+	}
+	grep := registry.Execute(context.Background(), call("Grep", `{"pattern":"needle","files":"**/*.txt"}`))
+	if grep.Content != "visible.txt:1: needle" {
+		t.Fatalf("grep result = %q", grep.Content)
+	}
+}
+
+func TestRegistryDiscoverySkipsGitIgnoredPaths(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not installed")
+	}
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte("ignored.txt\nignored-dir/\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"visible.txt", "ignored.txt", "ignored-dir/secret.txt"} {
+		full := filepath.Join(root, path)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte("needle\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if output, err := exec.Command("git", "-C", root, "init", "-q").CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, output)
+	}
+	registry, err := New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	glob := registry.Execute(context.Background(), call("Glob", `{"pattern":"**/*"}`))
+	if glob.Content != "visible.txt" {
+		t.Fatalf("glob result = %q", glob.Content)
+	}
+	grep := registry.Execute(context.Background(), call("Grep", `{"pattern":"needle","files":"**/*.txt"}`))
+	if grep.Content != "visible.txt:1: needle" {
+		t.Fatalf("grep result = %q", grep.Content)
+	}
+}
+
 func TestRegistryBoundsReadOutput(t *testing.T) {
 	root := t.TempDir()
 	lines := make([]string, maxLineLimit+25)

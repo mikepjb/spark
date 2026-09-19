@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/mikepjb/spark/internal/llm"
+	"github.com/mikepjb/spark/internal/workspace"
 )
 
 //go:embed definitions.json
@@ -527,6 +528,7 @@ func (r *Registry) walkMatchingPaths(ctx context.Context, pattern string, visit 
 	if err := validateGlobPattern(pattern); err != nil {
 		return err
 	}
+	ignored := workspace.NewIgnoreMatcher(ctx, r.root)
 	err := filepath.WalkDir(r.root, func(pathName string, entry os.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -542,6 +544,18 @@ func (r *Registry) walkMatchingPaths(ctx context.Context, pattern string, visit 
 			return nil
 		}
 		relative = filepath.ToSlash(relative)
+		if workspace.IsHidden(relative) {
+			if entry.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if ignored.Match(relative) {
+			if entry.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
 		if !globMatch(pattern, relative) {
 			return nil
 		}
