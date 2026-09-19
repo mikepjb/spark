@@ -271,6 +271,16 @@ func TestHistoryPreservesMessageContent(t *testing.T) {
 	}
 }
 
+func TestMarkdownRendererDoesNotPrefixBlankLine(t *testing.T) {
+	formatted, err := (&markdownRenderer{}).render("response", 40)
+	if err != nil {
+		t.Fatalf("render Markdown: %v", err)
+	}
+	if strings.HasPrefix(formatted, "\n") {
+		t.Fatalf("rendered Markdown started with a blank line: %q", formatted)
+	}
+}
+
 func TestSaveHistoryWritesRawMarkdownAndReportsSuccess(t *testing.T) {
 	m := initialModel()
 	m.historyFilePath = filepath.Join(t.TempDir(), historyExportFilename)

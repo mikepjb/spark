@@ -1,6 +1,9 @@
 package view
 
-import "charm.land/glamour/v2"
+import (
+	"charm.land/glamour/v2"
+	"charm.land/glamour/v2/styles"
+)
 
 type markdownRenderer struct {
 	width int
@@ -10,8 +13,10 @@ type markdownRenderer struct {
 func (r *markdownRenderer) render(content string, width int) (string, error) {
 	width = atLeastOne(width)
 	if r.term == nil || r.width != width {
+		style := styles.DarkStyleConfig
+		style.Document.StylePrimitive.BlockPrefix = ""
 		term, err := glamour.NewTermRenderer(
-			glamour.WithStandardStyle("dark"),
+			glamour.WithStyles(style),
 			glamour.WithWordWrap(width),
 		)
 		if err != nil {
