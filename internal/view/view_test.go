@@ -286,7 +286,7 @@ func TestStatusShowsBusySpinnerAndContext(t *testing.T) {
 	m.contextLimit = 4096
 
 	status := m.statusView()
-	for _, expected := range []string{"model: not connected", "context: 128/4096", "thinking"} {
+	for _, expected := range []string{"model: not connected", "context: 128/4k", "thinking"} {
 		if !strings.Contains(status, expected) {
 			t.Fatalf("status %q did not contain %q", status, expected)
 		}
@@ -294,6 +294,16 @@ func TestStatusShowsBusySpinnerAndContext(t *testing.T) {
 
 	if _, cmd := updateModel(t, m, m.spinner.Tick()); cmd == nil {
 		t.Fatal("expected busy spinner to schedule its next tick")
+	}
+}
+
+func TestStatusCompactsLargeContextCounts(t *testing.T) {
+	m := initialModel()
+	m.contextUsed = 64000
+	m.contextLimit = 64000
+
+	if status := m.statusView(); !strings.Contains(status, "context: 64k/64k") {
+		t.Fatalf("status = %q", status)
 	}
 }
 
@@ -310,7 +320,7 @@ func TestContextAndToolEventsUpdateStatus(t *testing.T) {
 	if m.contextUsed != 128 || m.contextLimit != 4096 {
 		t.Fatalf("context = %d/%d", m.contextUsed, m.contextLimit)
 	}
-	if status := m.statusView(); !strings.Contains(status, "context: 128/4096") || !strings.Contains(status, "tool: Read") {
+	if status := m.statusView(); !strings.Contains(status, "context: 128/4k") || !strings.Contains(status, "tool: Read") {
 		t.Fatalf("status = %q", status)
 	}
 }

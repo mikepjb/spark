@@ -545,7 +545,7 @@ func (m model) statusView() string {
 
 	context := "—"
 	if m.contextLimit > 0 {
-		context = fmt.Sprintf("%d/%d", m.contextUsed, m.contextLimit)
+		context = fmt.Sprintf("%s/%s", formatTokenCount(m.contextUsed), formatTokenCount(m.contextLimit))
 	}
 
 	queue := ""
@@ -558,6 +558,13 @@ func (m model) statusView() string {
 	}
 
 	return statusStyle.Render(fmt.Sprintf("%smodel: %s · context: %s · %s%s%s", activity, m.modelName, context, state, queue, notice))
+}
+
+func formatTokenCount(tokens int) string {
+	if tokens >= 1000 {
+		return fmt.Sprintf("%dk", tokens/1000)
+	}
+	return fmt.Sprintf("%d", tokens)
 }
 
 func (m *model) closeOverlay() {
