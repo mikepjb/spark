@@ -35,6 +35,7 @@ const (
 type Result struct {
 	Summary string
 	Content string
+	Failed  bool
 }
 
 type Registry struct {
@@ -389,7 +390,7 @@ func (r *Registry) runGit(parent context.Context, arguments []string, label stri
 		if content == "" {
 			return errorResult(fmt.Errorf("%s failed: %w", label, err))
 		}
-		return Result{Summary: fmt.Sprintf("%s failed", label), Content: content}
+		return Result{Summary: fmt.Sprintf("%s failed", label), Content: content, Failed: true}
 	}
 	return Result{Summary: label, Content: content}
 }
@@ -645,5 +646,5 @@ func truncateLine(line string) string {
 
 func errorResult(err error) Result {
 	message := "Error: " + err.Error()
-	return Result{Summary: message, Content: message}
+	return Result{Summary: message, Content: message, Failed: true}
 }

@@ -1,6 +1,7 @@
 package view
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -211,6 +212,8 @@ func TestMessageMarkersUseStatusColors(t *testing.T) {
 		{name: "completed", role: roleAssistant, state: statusCompleted, mark: assistantMarker, color: completedMarkerColor},
 		{name: "succeeded", role: roleAssistant, state: statusSucceeded, mark: assistantMarker, color: succeededMarkerColor},
 		{name: "failed", role: roleAssistant, state: statusFailed, mark: assistantMarker, color: failedMarkerColor},
+		{name: "tool succeeded", role: roleTool, state: statusSucceeded, mark: assistantMarker, color: succeededMarkerColor},
+		{name: "tool failed", role: roleTool, state: statusFailed, mark: assistantMarker, color: failedMarkerColor},
 	}
 
 	for _, test := range tests {
@@ -287,6 +290,12 @@ func TestStatusShowsBusySpinnerAndContext(t *testing.T) {
 
 	status := m.statusView()
 	for _, expected := range []string{"model: not connected", "context: 128/4k", "thinking"} {
+		if expected == "thinking" {
+			if strings.Contains(status, expected) {
+				t.Fatalf("status %q unexpectedly contained %q", status, expected)
+			}
+			continue
+		}
 		if !strings.Contains(status, expected) {
 			t.Fatalf("status %q did not contain %q", status, expected)
 		}
@@ -315,13 +324,44 @@ func TestContextAndToolEventsUpdateStatus(t *testing.T) {
 		ContextUsed:  128,
 		ContextLimit: 4096,
 	}})
-	m, _ = updateModel(t, m, replEventMsg{event: repl.Event{Kind: repl.EventTool, Content: "Read"}})
+	m, _ = updateModel(t, m, replEventMsg{event: repl.Event{Kind: repl.EventToolStarted, RequestID: 1, ToolCallID: "call_1", Content: "Read"}})
+	m, _ = updateModel(t, m, replEventMsg{event: repl.Event{Kind: repl.EventToolCompleted, RequestID: 1, ToolCallID: "call_1", Content: "Read notes.txt", Failed: false}})
 
 	if m.contextUsed != 128 || m.contextLimit != 4096 {
 		t.Fatalf("context = %d/%d", m.contextUsed, m.contextLimit)
 	}
-	if status := m.statusView(); !strings.Contains(status, "context: 128/4k") || !strings.Contains(status, "tool: Read") {
+	if status := m.statusView(); !strings.Contains(status, "context: 128/4k") || strings.Contains(status, "Read") || strings.Contains(status, "thinking") {
 		t.Fatalf("status = %q", status)
+	}
+	if len(m.history) != 1 || m.history[0].role != roleTool || m.history[0].status != statusSucceeded || m.history[0].content != "Read notes.txt" {
+		t.Fatalf("tool history = %+v", m.history)
+	}
+}
+
+func TestToolHistoryPreservesRoundOrderAndFailure(t *testing.T) {
+	m := initialModel()
+	m.resize(60, 20)
+
+	m, _ = updateModel(t, m, replEventMsg{event: repl.Event{Kind: repl.EventStarted, RequestID: 1}})
+	m, _ = updateModel(t, m, replEventMsg{event: repl.Event{Kind: repl.EventChunk, RequestID: 1, Content: "before"}})
+	m, _ = updateModel(t, m, replEventMsg{event: repl.Event{Kind: repl.EventToolStarted, RequestID: 1, ToolCallID: "call_1", Content: "Read"}})
+	if len(m.history) != 2 || m.history[1].role != roleTool || m.history[1].status != statusActive || m.history[1].content != "Read" {
+		t.Fatalf("active tool history = %+v", m.history)
+	}
+	m, _ = updateModel(t, m, replEventMsg{event: repl.Event{Kind: repl.EventToolCompleted, RequestID: 1, ToolCallID: "call_1", Content: "Error: missing.txt", Failed: true}})
+	m, _ = updateModel(t, m, replEventMsg{event: repl.Event{Kind: repl.EventChunk, RequestID: 1, Content: "after"}})
+
+	if len(m.history) != 3 {
+		t.Fatalf("history length = %d, want 3: %+v", len(m.history), m.history)
+	}
+	if got := []string{m.history[0].role, m.history[1].role, m.history[2].role}; !reflect.DeepEqual(got, []string{roleAssistant, roleTool, roleAssistant}) {
+		t.Fatalf("history roles = %v", got)
+	}
+	if m.history[1].status != statusFailed || m.history[1].content != "Error: missing.txt" {
+		t.Fatalf("tool history entry = %+v", m.history[1])
+	}
+	if m.history[0].content != "before" || m.history[2].content != "after" {
+		t.Fatalf("assistant history = %+v", m.history)
 	}
 }
 

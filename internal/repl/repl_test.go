@@ -204,9 +204,13 @@ func TestCoordinatorExecutesToolCallsAndContinuesConversation(t *testing.T) {
 	if contextEvent.ContextUsed != 12 || contextEvent.ContextLimit != 64000 {
 		t.Fatalf("first context event = %+v", contextEvent)
 	}
-	toolEvent := waitForEvent(t, coordinator.Events(), EventTool, id)
-	if toolEvent.Content != "Read" {
-		t.Fatalf("tool event = %+v", toolEvent)
+	toolStarted := waitForEvent(t, coordinator.Events(), EventToolStarted, id)
+	if toolStarted.Content != "Read" || toolStarted.ToolCallID != "call_1" {
+		t.Fatalf("tool started event = %+v", toolStarted)
+	}
+	toolCompleted := waitForEvent(t, coordinator.Events(), EventToolCompleted, id)
+	if toolCompleted.Content != "Read notes.txt (lines 1-1 of 1)" || toolCompleted.Failed {
+		t.Fatalf("tool completed event = %+v", toolCompleted)
 	}
 	waitForEvent(t, coordinator.Events(), EventChunk, id)
 	secondContext := waitForEvent(t, coordinator.Events(), EventContext, id)

@@ -18,22 +18,25 @@ import (
 type EventKind string
 
 const (
-	EventQueued       EventKind = "queued"
-	EventStarted      EventKind = "started"
-	EventChunk        EventKind = "chunk"
-	EventCompleted    EventKind = "completed"
-	EventFailed       EventKind = "failed"
-	EventCancelled    EventKind = "cancelled"
-	EventContext      EventKind = "context"
-	EventTool         EventKind = "tool"
-	EventQueueCleared EventKind = "queue-cleared"
-	EventQueueFull    EventKind = "queue-full"
+	EventQueued        EventKind = "queued"
+	EventStarted       EventKind = "started"
+	EventChunk         EventKind = "chunk"
+	EventCompleted     EventKind = "completed"
+	EventFailed        EventKind = "failed"
+	EventCancelled     EventKind = "cancelled"
+	EventContext       EventKind = "context"
+	EventToolStarted   EventKind = "tool-started"
+	EventToolCompleted EventKind = "tool-completed"
+	EventQueueCleared  EventKind = "queue-cleared"
+	EventQueueFull     EventKind = "queue-full"
 )
 
 type Event struct {
 	Kind         EventKind
 	RequestID    uint64
 	Content      string
+	ToolCallID   string
+	Failed       bool
 	QueueCount   int
 	ContextUsed  int
 	ContextLimit int
@@ -256,11 +259,12 @@ func (c *Coordinator) process(req request, ctx context.Context) {
 		messages = append(messages, assistant)
 		intermediate = append(intermediate, assistant)
 		for _, call := range calls {
-			c.emit(Event{Kind: EventTool, RequestID: req.id, Content: call.Name})
-			result := tools.Result{Summary: "tool unavailable", Content: "tool execution is unavailable"}
+			c.emit(Event{Kind: EventToolStarted, RequestID: req.id, ToolCallID: call.ID, Content: call.Name})
+			result := tools.Result{Summary: "tool unavailable", Content: "tool execution is unavailable", Failed: true}
 			if c.config.Tools != nil {
 				result = c.config.Tools.Execute(ctx, call)
 			}
+			c.emit(Event{Kind: EventToolCompleted, RequestID: req.id, ToolCallID: call.ID, Content: result.Summary, Failed: result.Failed})
 			toolMessage := llm.Message{Role: "tool", Content: llm.StringContent(result.Content), ToolCallID: call.ID}
 			messages = append(messages, toolMessage)
 			intermediate = append(intermediate, toolMessage)

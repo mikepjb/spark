@@ -27,6 +27,7 @@ const (
 	maxInputHeight = 6
 	roleUser       = "user"
 	roleAssistant  = "assistant"
+	roleTool       = "tool"
 )
 
 type messageStatus uint8
@@ -72,6 +73,7 @@ var (
 type chatMessage struct {
 	id                   uint64
 	role                 string
+	toolID               string
 	content              string
 	status               messageStatus
 	renderedContent      string
@@ -372,7 +374,7 @@ func (m *model) handleReplEvent(event repl.Event) tea.Cmd {
 		m.spinner, cmd = m.spinner.Update(m.spinner.Tick())
 		return cmd
 	case repl.EventChunk:
-		if message := m.messageByID(event.RequestID, roleAssistant); message != nil {
+		if message := m.assistantMessageForChunk(event.RequestID); message != nil {
 			// Chunks may end inside any Markdown construct; always re-render the
 			// accumulated source so later chunks can close it correctly.
 			message.content += event.Content
@@ -404,8 +406,26 @@ func (m *model) handleReplEvent(event repl.Event) tea.Cmd {
 		if event.ContextLimit > 0 {
 			m.contextLimit = event.ContextLimit
 		}
-	case repl.EventTool:
-		m.notice = "tool: " + event.Content
+	case repl.EventToolStarted:
+		m.history = append(m.history, chatMessage{
+			id:      event.RequestID,
+			role:    roleTool,
+			toolID:  event.ToolCallID,
+			content: event.Content,
+			status:  statusActive,
+		})
+		m.refreshHistory(true)
+	case repl.EventToolCompleted:
+		if message := m.messageByToolID(event.RequestID, event.ToolCallID); message != nil {
+			message.status = statusSucceeded
+			if event.Failed {
+				message.status = statusFailed
+			}
+			if event.Content != "" {
+				message.content = event.Content
+			}
+			m.refreshHistory(true)
+		}
 	case repl.EventQueueCleared:
 		m.queued = 0
 		m.notice = "queued messages cleared"
@@ -417,9 +437,35 @@ func (m *model) handleReplEvent(event repl.Event) tea.Cmd {
 }
 
 func (m *model) messageByID(id uint64, role string) *chatMessage {
-	for i := range m.history {
+	for i := len(m.history) - 1; i >= 0; i-- {
 		if m.history[i].id == id && m.history[i].role == role {
 			return &m.history[i]
+		}
+	}
+	return nil
+}
+
+func (m *model) assistantMessageForChunk(id uint64) *chatMessage {
+	for i := len(m.history) - 1; i >= 0; i-- {
+		if m.history[i].id != id {
+			continue
+		}
+		switch m.history[i].role {
+		case roleAssistant:
+			return &m.history[i]
+		case roleTool:
+			m.history = append(m.history, chatMessage{id: id, role: roleAssistant, status: statusActive})
+			return &m.history[len(m.history)-1]
+		}
+	}
+	return nil
+}
+
+func (m *model) messageByToolID(requestID uint64, toolID string) *chatMessage {
+	for i := len(m.history) - 1; i >= 0; i-- {
+		message := &m.history[i]
+		if message.id == requestID && message.role == roleTool && message.toolID == toolID {
+			return message
 		}
 	}
 	return nil
@@ -536,10 +582,8 @@ func messageMarker(message chatMessage) (string, string) {
 }
 
 func (m model) statusView() string {
-	state := "ready"
 	activity := ""
 	if m.busy {
-		state = "thinking"
 		activity = m.spinner.View() + " "
 	}
 
@@ -557,7 +601,7 @@ func (m model) statusView() string {
 		notice = " · " + m.notice
 	}
 
-	return statusStyle.Render(fmt.Sprintf("%smodel: %s · context: %s · %s%s%s", activity, m.modelName, context, state, queue, notice))
+	return statusStyle.Render(fmt.Sprintf("%smodel: %s · context: %s%s%s", activity, m.modelName, context, queue, notice))
 }
 
 func formatTokenCount(tokens int) string {
