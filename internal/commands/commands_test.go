@@ -52,6 +52,17 @@ func TestPrepareLoadsSlashAndDollarSkills(t *testing.T) {
 	}
 }
 
+func TestPrepareDoesNotAutoActivateSkillMentions(t *testing.T) {
+	engine := testEngine(t, nil)
+	prepared, err := engine.Prepare("use the analyse approach")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prepared.Submission == nil || len(prepared.Submission.Skills) != 0 {
+		t.Fatalf("prepared = %+v", prepared)
+	}
+}
+
 func TestPreparePreservesOrdinaryPromptWhitespace(t *testing.T) {
 	engine := testEngine(t, nil)
 	prepared, err := engine.Prepare("first line\n\n  second line")

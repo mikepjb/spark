@@ -103,8 +103,6 @@ func skillRoots(workspace string, configured []string) ([]string, error) {
 	}
 	return []string{
 		filepath.Join(workspace, ".agents", "skills"),
-		filepath.Join(workspace, ".agent", "skills"),
 		filepath.Join(home, ".agents", "skills"),
-		filepath.Join(home, ".agent", "skills"),
 	}, nil
 }

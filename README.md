@@ -8,7 +8,6 @@ running comfortably on a consumer laptop.
 ## Features to be implemented
 
 - /model be able to switch between llama.cpp qwen and openai/fireworks
-- explicit skill use with `/analyse` and `$analyse`
 - consider integrating LSPs for core langs go/java/typescript/python to help
   extend the abilities of a small qwen 3.5 2b model where it may be missing
   knowledge about specific libraries but can still find code to navigate
@@ -111,14 +110,14 @@ inspect the repository's configuration using $analyse
 By default Spark searches these roots in order:
 
 - `.agents/skills`
-- `.agent/skills`
 - `~/.agents/skills`
-- `~/.agent/skills`
 
 The `skill_paths` setting in `.sparkrc` replaces these defaults. Skills are
-loaded only for the request that explicitly references them. Spark does not
-automatically select skills or execute scripts bundled with them. Skill
-instructions cannot expand Spark's read-only capabilities.
+loaded only for the request that explicitly references them with `/skill-name`
+or `$skill-name`. Activated skill instructions are included in that request's
+user message; they are not automatically selected, persisted as active context,
+or used to execute scripts bundled with the skill. Skill instructions cannot
+expand Spark's read-only capabilities.
 
 ## Target languages
 

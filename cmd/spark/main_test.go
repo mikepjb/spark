@@ -21,9 +21,7 @@ func TestSkillRootsUseProjectAndGlobalConventionsByDefault(t *testing.T) {
 
 	want := []string{
 		filepath.Join(workspace, ".agents", "skills"),
-		filepath.Join(workspace, ".agent", "skills"),
 		filepath.Join(home, ".agents", "skills"),
-		filepath.Join(home, ".agent", "skills"),
 	}
 	if !reflect.DeepEqual(roots, want) {
 		t.Fatalf("roots = %v, want %v", roots, want)

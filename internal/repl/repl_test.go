@@ -146,15 +146,25 @@ func TestCoordinatorActivatesSkillsForOneRequest(t *testing.T) {
 	firstID, err := coordinator.SubmitSubmission(Submission{
 		Display: "/analyse inspect",
 		Prompt:  "inspect",
-		Skills:  []SkillUse{{Name: "analyse", Body: "Use evidence."}},
+		Skills: []SkillUse{
+			{Name: "analyse", Body: "Use evidence."},
+			{Name: "analyse", Body: "Use evidence again."},
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	waitForEvent(t, coordinator.Events(), EventCompleted, firstID)
 	firstRequest := client.request(0)
-	if len(firstRequest.Messages) != 4 || firstRequest.Messages[1].Content == nil || !strings.Contains(*firstRequest.Messages[1].Content, "Use evidence.") || firstRequest.Messages[2].Content == nil || !strings.Contains(*firstRequest.Messages[2].Content, "read-only policy") {
+	if len(firstRequest.Messages) != 2 || firstRequest.Messages[1].Role != "user" || firstRequest.Messages[1].Content == nil {
 		t.Fatalf("first request messages = %+v", firstRequest.Messages)
+	}
+	firstContent := *firstRequest.Messages[1].Content
+	if !strings.Contains(firstContent, "Use evidence.") || strings.Contains(firstContent, "Use evidence again.") || !strings.Contains(firstContent, "inspect") {
+		t.Fatalf("first request user content = %q", firstContent)
+	}
+	if strings.Contains(*firstRequest.Messages[0].Content, "Use evidence.") {
+		t.Fatalf("skill content was injected into the system message: %+v", firstRequest.Messages[0])
 	}
 
 	secondID, err := coordinator.Submit("next")
