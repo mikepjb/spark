@@ -35,8 +35,23 @@ func TestLoadFromFileUsesDefaultsWhenMissing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Endpoint != defaultEndpoint || got.QueueLimit != defaultQueueSize || got.ContextLimit != defaultContextLimit {
+	if got.Endpoint != defaultEndpoint || got.SystemPrompt != defaultSystemPrompt || got.QueueLimit != defaultQueueSize || got.ContextLimit != defaultContextLimit {
 		t.Fatalf("unexpected defaults: %+v", got)
+	}
+}
+
+func TestLoadFromFileUsesDefaultSystemPromptForEmptyConfigValue(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".sparkrc")
+	if err := os.WriteFile(path, []byte("system_prompt: \"\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := LoadFromFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.SystemPrompt != defaultSystemPrompt {
+		t.Fatalf("unexpected system prompt: %q", got.SystemPrompt)
 	}
 }
 

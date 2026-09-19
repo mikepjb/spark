@@ -1,4 +1,4 @@
-.PHONY: dev install test config
+.PHONY: dev install lint test config
 
 dev:
 	go run ./cmd/spark/main.go
@@ -6,7 +6,10 @@ dev:
 install:
 	go install ./cmd/spark
 
-test:
+lint:
+	golangci-lint run
+
+test: lint
 	go test -v ./...
 
 config:

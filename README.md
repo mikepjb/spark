@@ -12,6 +12,10 @@ running comfortably on a consumer laptop.
 - /model be able to switch between llama.cpp qwen and openai/fireworks
 - setup default system prompt (based on consult version)
 - skill use /analyse etc
+- consider integrating LSPs for core langs go/java/typescript/python to help
+  extend the abilities of a small qwen 3.5 2b model where it may be missing
+  knowledge about specific libraries but can still find code to navigate
+  questions about 3rd party code.
 
 ## How this might be useful
 
