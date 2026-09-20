@@ -5,8 +5,26 @@ keep people in the loop and to expose only tightly controlled, read-only tools.
 The initial target is a small local model such as a quantized Qwen 2B or 4B,
 running comfortably on a consumer laptop.
 
+## Model Targets
+
+- Qwen 3.5 2B
+    - Released February 2026
+    - Solid contender, not a lot to complain about.
+    - Reliable tool calling, does not over do it either
+    - Responses are pretty clean (for AI)
+    - Knowledgable enough i.e knows what HTMX is/go/java etc
+
+- MiniCPM5 2B
+    - More recent September 2026 release
+    - On benchmarks it is very strong
+    - However it has a tendency to spam tool calls even when unwarranted, i.e
+      get a list of all files, read the readme when it's been asked a question
+      about a technical topic that needs no codebase interaction.
+    - Possible this is to do with my user prompt, will have to test it out.
+
 ## New features to be added
 
+- Kagi API for WebSearch tool call
 - we should probably give the model some additional context like the time of
   day.. their present working directory? and check other harnesses to see what
   they provide.
@@ -20,6 +38,12 @@ running comfortably on a consumer laptop.
   9m 51s' or however long the time elapsed has taken.
 - look at how pi/opencode/codex to their glob/grep/reads to see if there are any
   tricks we can pull to make this more efficient.
+- update grouped explore UI to use vertical/angled 'tree' symbols to visually
+  link children to parent group
+- Somehow curb minicpm5's tendency to hammer a bunch of explore (grep/glob/read)
+  tool calls even when it obviously isn't warranted
+- `Found 0 files for *.go, found 26 files for **/*.go` - we should have results
+  for each tbh. (qwen went for *.go first)
 
 ## How this might be useful
 

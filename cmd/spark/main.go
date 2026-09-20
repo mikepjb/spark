@@ -111,7 +111,6 @@ func userAgentPrompt() (string, error) {
 func userAgentPromptFromHome(home string) (string, error) {
 	for _, path := range []string{
 		filepath.Join(home, ".agents", "AGENTS.md"),
-		filepath.Join(home, ".codex", "AGENTS.md"),
 	} {
 		data, err := os.ReadFile(path)
 		if err == nil {
