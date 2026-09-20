@@ -121,6 +121,37 @@ func TestOpenAIClientReturnsMalformedStreamError(t *testing.T) {
 	}
 }
 
+func TestOpenAIClientStopsAtFinishReason(t *testing.T) {
+	server := newTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"done\"},\"finish_reason\":null}]}\n\n")
+		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n")
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+	}))
+	defer server.Close()
+
+	client, err := NewClient(ClientConfig{Endpoint: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stream, err := client.Complete(context.Background(), Request{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Close()
+
+	delta, err := stream.Next()
+	if err != nil || delta.Content != "done" || delta.Done {
+		t.Fatalf("delta = %+v, err = %v", delta, err)
+	}
+	delta, err = stream.Next()
+	if err != nil || !delta.Done {
+		t.Fatalf("finish delta = %+v, err = %v", delta, err)
+	}
+}
+
 func TestOpenAIClientStreamsToolCallsAndUsage(t *testing.T) {
 	server := newTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var request Request

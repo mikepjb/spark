@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/mikepjb/spark/internal/llm"
 	"github.com/mikepjb/spark/internal/tools"
@@ -44,11 +45,13 @@ type Event struct {
 }
 
 type Config struct {
-	Model        string
-	SystemPrompt string
-	QueueLimit   int
-	ContextLimit int
-	Tools        *tools.Registry
+	Model          string
+	SystemPrompt   string
+	QueueLimit     int
+	ContextLimit   int
+	ToolRoundLimit int
+	RequestTimeout time.Duration
+	Tools          *tools.Registry
 }
 
 type SkillUse struct {
@@ -67,7 +70,10 @@ var (
 	ErrQueueFull = errors.New("repl queue is full")
 )
 
-const maxToolRounds = 8
+const (
+	defaultToolRoundLimit = 8
+	defaultRequestTimeout = 10 * time.Minute
+)
 
 type Coordinator struct {
 	client llm.Client
@@ -100,6 +106,12 @@ func New(client llm.Client, config Config) *Coordinator {
 	}
 	if config.ContextLimit < 1 {
 		config.ContextLimit = 64000
+	}
+	if config.ToolRoundLimit < 1 {
+		config.ToolRoundLimit = defaultToolRoundLimit
+	}
+	if config.RequestTimeout <= 0 {
+		config.RequestTimeout = defaultRequestTimeout
 	}
 
 	c := &Coordinator{
@@ -221,7 +233,7 @@ func (c *Coordinator) next() (request, context.Context, bool) {
 		if len(c.queue) > 0 {
 			req := c.queue[0]
 			c.queue = c.queue[1:]
-			ctx, cancel := context.WithCancel(context.Background())
+			ctx, cancel := context.WithTimeout(context.Background(), c.config.RequestTimeout)
 			c.activeCancel = cancel
 			c.mu.Unlock()
 			return req, ctx, true
@@ -296,8 +308,17 @@ func (c *Coordinator) process(req request, ctx context.Context) {
 			c.complete(req, response, intermediate)
 			return
 		}
-		if round >= maxToolRounds {
-			c.fail(req.id, fmt.Errorf("tool-call limit reached after %d rounds", maxToolRounds), true)
+		if round >= c.config.ToolRoundLimit {
+			finalResponse, err := c.finalizeWithoutTools(ctx, req.id, client, model, messages)
+			if err != nil {
+				if errors.Is(ctx.Err(), context.Canceled) {
+					c.emit(Event{Kind: EventCancelled, RequestID: req.id, Content: finalResponse})
+					return
+				}
+				c.fail(req.id, err, true)
+				return
+			}
+			c.complete(req, finalResponse, intermediate)
 			return
 		}
 
@@ -316,6 +337,37 @@ func (c *Coordinator) process(req request, ctx context.Context) {
 			intermediate = append(intermediate, toolMessage)
 		}
 	}
+}
+
+func (c *Coordinator) finalizeWithoutTools(ctx context.Context, requestID uint64, client llm.Client, model string, messages []llm.Message) (string, error) {
+	finalMessages := append([]llm.Message(nil), messages...)
+	finalMessages = append(finalMessages, llm.Message{
+		Role:    "user",
+		Content: llm.StringContent("The configured tool-call round limit has been reached. Using only the evidence gathered so far, provide the best answer to the original request now. Do not request or use any more tools."),
+	})
+	request := llm.Request{
+		Model:         model,
+		Messages:      finalMessages,
+		Stream:        true,
+		StreamOptions: &llm.StreamOptions{IncludeUsage: true},
+	}
+	c.recordAPIRequest(request)
+	stream, err := client.Complete(ctx, request)
+	if err != nil {
+		return "", fmt.Errorf("finalize after tool-call limit: %w", err)
+	}
+	response, calls, streamErr := c.readStream(ctx, requestID, stream)
+	_ = stream.Close()
+	if streamErr != nil {
+		return response, fmt.Errorf("finalize after tool-call limit: %w", streamErr)
+	}
+	if len(calls) > 0 {
+		return response, fmt.Errorf("final response requested tools after the tool-call limit")
+	}
+	if strings.TrimSpace(response) == "" {
+		return response, fmt.Errorf("final response after tool-call limit was empty")
+	}
+	return response, nil
 }
 
 func (c *Coordinator) APIHistory() []llm.Request {
@@ -419,6 +471,9 @@ func (c *Coordinator) readStream(ctx context.Context, requestID uint64, stream l
 				call.Name = fragment.Name
 			}
 			call.Arguments += fragment.Arguments
+		}
+		if delta.Done {
+			return response.String(), assembleToolCalls(fragments), nil
 		}
 		if err := ctx.Err(); err != nil {
 			return response.String(), nil, err

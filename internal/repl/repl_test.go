@@ -325,6 +325,71 @@ func TestCoordinatorExecutesToolCallsAndContinuesConversation(t *testing.T) {
 	}
 }
 
+func TestCoordinatorFinalizesAfterToolRoundLimit(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "notes.txt"), []byte("tool result\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	registry, err := tools.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	toolCall := llm.ToolCallDelta{Index: 0, ID: "call_1", Name: "Read", Arguments: `{"filePath":"notes.txt"}`}
+	client := newFakeClient()
+	client.streams <- &deltaStream{deltas: []llm.Delta{{ToolCall: []llm.ToolCallDelta{toolCall}}}}
+	client.streams <- &deltaStream{deltas: []llm.Delta{{ToolCall: []llm.ToolCallDelta{{Index: 0, ID: "call_2", Name: "Read", Arguments: `{"filePath":"not-executed.txt"}`}}}}}
+	client.streams <- &deltaStream{deltas: []llm.Delta{{Content: "final answer"}}}
+
+	coordinator := New(client, Config{Model: "test-model", Tools: registry, ToolRoundLimit: 1})
+	defer coordinator.Close()
+	id, err := coordinator.Submit("inspect notes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitForEvent(t, coordinator.Events(), EventQueued, id)
+	waitForEvent(t, coordinator.Events(), EventStarted, id)
+	waitForEvent(t, coordinator.Events(), EventToolStarted, id)
+	waitForEvent(t, coordinator.Events(), EventToolCompleted, id)
+	waitForEvent(t, coordinator.Events(), EventChunk, id)
+	waitForEvent(t, coordinator.Events(), EventCompleted, id)
+
+	select {
+	case event := <-coordinator.Events():
+		if event.Kind == EventToolStarted {
+			t.Fatalf("tool call at limit was executed: %+v", event)
+		}
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	finalRequest := client.request(2)
+	if len(finalRequest.Tools) != 0 {
+		t.Fatalf("final request exposed tools: %+v", finalRequest.Tools)
+	}
+	if len(finalRequest.Messages) != 4 || finalRequest.Messages[3].Role != "user" || finalRequest.Messages[3].Content == nil || !strings.Contains(*finalRequest.Messages[3].Content, "round limit") {
+		t.Fatalf("final request messages = %+v", finalRequest.Messages)
+	}
+	if history := coordinator.APIHistory(); len(history) != 3 {
+		t.Fatalf("API history length = %d, want 3", len(history))
+	}
+}
+
+func TestCoordinatorRequestTimeoutFailsBlockedStream(t *testing.T) {
+	client := newFakeClient()
+	client.streams <- &blockingStream{started: make(chan struct{})}
+	coordinator := New(client, Config{Model: "test-model", RequestTimeout: 20 * time.Millisecond})
+	defer coordinator.Close()
+
+	id, err := coordinator.Submit("inspect this")
+	if err != nil {
+		t.Fatal(err)
+	}
+	event := waitForEvent(t, coordinator.Events(), EventFailed, id)
+	if event.Err == nil || !strings.Contains(event.Err.Error(), "deadline exceeded") {
+		t.Fatalf("timeout error = %v", event.Err)
+	}
+}
+
 func TestCoordinatorRecordsAPIRequestBeforeStreamFailure(t *testing.T) {
 	client := newFakeClient()
 	client.streams <- &errorStream{err: errors.New("inference failed")}

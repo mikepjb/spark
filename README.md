@@ -111,6 +111,19 @@ user message; they are not automatically selected, persisted as active context,
 or used to execute scripts bundled with the skill. Skill instructions cannot
 expand Spark's read-only capabilities.
 
+## Configuration
+
+The `.sparkrc` file controls runtime defaults. The tool-call round limit is
+configurable per user request and defaults to 8:
+
+```yaml
+tool_round_limit: 8
+```
+
+The environment variable `SPARK_TOOL_ROUND_LIMIT` overrides the file setting.
+When the limit is reached, Spark asks the model to produce a final answer from
+the evidence already gathered instead of treating the limit itself as an error.
+
 ## Target languages
 
 - Go

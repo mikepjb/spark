@@ -43,6 +43,7 @@ type Delta struct {
 	Content  string
 	ToolCall []ToolCallDelta
 	Usage    *Usage
+	Done     bool
 }
 
 type ToolCall struct {

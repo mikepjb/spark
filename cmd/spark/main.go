@@ -59,11 +59,12 @@ func main() {
 	}
 
 	coordinator := repl.New(currentModel.Client, repl.Config{
-		Model:        currentModel.Model,
-		SystemPrompt: cfg.SystemPrompt,
-		QueueLimit:   cfg.QueueLimit,
-		ContextLimit: cfg.ContextLimit,
-		Tools:        registry,
+		Model:          currentModel.Model,
+		SystemPrompt:   cfg.SystemPrompt,
+		QueueLimit:     cfg.QueueLimit,
+		ContextLimit:   cfg.ContextLimit,
+		ToolRoundLimit: cfg.ToolRoundLimit,
+		Tools:          registry,
 	})
 	modelOptions := make([]commands.ModelOption, 0, len(modelManager.Choices()))
 	for _, choice := range modelManager.Choices() {

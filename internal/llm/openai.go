@@ -127,6 +127,7 @@ func (s *stream) Next() (Delta, error) {
 						} `json:"function"`
 					} `json:"tool_calls"`
 				} `json:"delta"`
+				FinishReason *string `json:"finish_reason"`
 			} `json:"choices"`
 			Usage *Usage `json:"usage"`
 		}
@@ -145,6 +146,7 @@ func (s *stream) Next() (Delta, error) {
 			continue
 		}
 		delta.Content = response.Choices[0].Delta.Content
+		delta.Done = response.Choices[0].FinishReason != nil
 		for _, toolCall := range response.Choices[0].Delta.ToolCalls {
 			delta.ToolCall = append(delta.ToolCall, ToolCallDelta{
 				Index:     toolCall.Index,
@@ -153,7 +155,7 @@ func (s *stream) Next() (Delta, error) {
 				Arguments: toolCall.Function.Arguments,
 			})
 		}
-		if delta.Content == "" && len(delta.ToolCall) == 0 && delta.Usage == nil {
+		if delta.Content == "" && len(delta.ToolCall) == 0 && delta.Usage == nil && !delta.Done {
 			continue
 		}
 		return delta, nil

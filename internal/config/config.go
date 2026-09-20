@@ -14,6 +14,7 @@ const (
 	defaultEndpoint     = "http://127.0.0.1:7777"
 	defaultQueueSize    = 5
 	defaultContextLimit = 64000
+	defaultToolRounds   = 8
 	defaultPath         = ".sparkrc"
 
 	defaultSystemPrompt = `You are Spark, a local, read-only software engineering assistant.
@@ -60,15 +61,16 @@ suggestions. Never expose or request secrets unnecessarily.`
 )
 
 type Config struct {
-	Endpoint     string                    `yaml:"endpoint"`
-	Model        string                    `yaml:"model"`
-	SystemPrompt string                    `yaml:"system_prompt"`
-	APIKey       string                    `yaml:"-"`
-	QueueLimit   int                       `yaml:"queue_limit"`
-	ContextLimit int                       `yaml:"context_limit"`
-	Providers    map[string]ProviderConfig `yaml:"providers"`
-	Models       map[string]ModelConfig    `yaml:"models"`
-	SkillPaths   []string                  `yaml:"skill_paths"`
+	Endpoint       string                    `yaml:"endpoint"`
+	Model          string                    `yaml:"model"`
+	SystemPrompt   string                    `yaml:"system_prompt"`
+	APIKey         string                    `yaml:"-"`
+	QueueLimit     int                       `yaml:"queue_limit"`
+	ContextLimit   int                       `yaml:"context_limit"`
+	ToolRoundLimit int                       `yaml:"tool_round_limit"`
+	Providers      map[string]ProviderConfig `yaml:"providers"`
+	Models         map[string]ModelConfig    `yaml:"models"`
+	SkillPaths     []string                  `yaml:"skill_paths"`
 }
 
 type ProviderConfig struct {
@@ -91,10 +93,11 @@ func Load() (Config, error) {
 
 func LoadFromFile(path string) (Config, error) {
 	cfg := Config{
-		Endpoint:     defaultEndpoint,
-		SystemPrompt: defaultSystemPrompt,
-		QueueLimit:   defaultQueueSize,
-		ContextLimit: defaultContextLimit,
+		Endpoint:       defaultEndpoint,
+		SystemPrompt:   defaultSystemPrompt,
+		QueueLimit:     defaultQueueSize,
+		ContextLimit:   defaultContextLimit,
+		ToolRoundLimit: defaultToolRounds,
 	}
 
 	data, err := os.ReadFile(path)
@@ -119,6 +122,9 @@ func LoadFromFile(path string) (Config, error) {
 	}
 	if cfg.ContextLimit < 1 {
 		return Config{}, fmt.Errorf("context_limit must be at least 1")
+	}
+	if cfg.ToolRoundLimit < 1 {
+		return Config{}, fmt.Errorf("tool_round_limit must be at least 1")
 	}
 
 	return cfg, nil
@@ -150,6 +156,13 @@ func applyEnvironment(cfg *Config) error {
 			return fmt.Errorf("parse SPARK_CONTEXT_LIMIT: %w", err)
 		}
 		cfg.ContextLimit = limit
+	}
+	if value, ok := os.LookupEnv("SPARK_TOOL_ROUND_LIMIT"); ok {
+		limit, err := strconv.Atoi(value)
+		if err != nil {
+			return fmt.Errorf("parse SPARK_TOOL_ROUND_LIMIT: %w", err)
+		}
+		cfg.ToolRoundLimit = limit
 	}
 
 	return nil
