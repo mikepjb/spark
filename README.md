@@ -5,16 +5,17 @@ keep people in the loop and to expose only tightly controlled, read-only tools.
 The initial target is a small local model such as a quantized Qwen 2B or 4B,
 running comfortably on a consumer laptop.
 
-## Features to be implemented
+## New features to be added
 
-- /model be able to switch between llama.cpp qwen and openai/fireworks
-- make sure we are printing feedback in the UI when tool calls are being used
-- display issue, there is no 'in-progress' display in the history for when the
-  LLM is inferencing or 'thinking'
-- display issue, currently llm output in the history seems to have an empty line
-  at the beginning - not sure if that's a parsing issue or what's going on
-  there.
-- Read/Grep etc combine into a Explored phase visually
+- we should probably give the model some additional context like the time of
+  day.. their present working directory? and check other harnesses to see what
+  they provide.
+- context counting no longer seems to work with minicpm5 / llama.cpp v0.4.1 or
+  maybe I messed up my llm bash script.
+- make the tool call budget visible to the model in tool call metadata
+- distinguish between a 'system prompt' and the users agents prompt.. there are
+  some internal things to help drive minicpm5 that will be distinct from user
+  agents.md
 
 ## How this might be useful
 
@@ -23,32 +24,6 @@ running comfortably on a consumer laptop.
   but there is at least some level of exposure and learning that you won't get
   with a fully autonomous agent.
 
-## Human Approach
-
-- I want to use the `/v1/chat/completions` API running against llama.cpp that
-  has Qwen 3.5 2B loaded.
-
-## Generated Approach
-
-Spark will be a local TUI and agent coordinator that connects to an externally
-managed LLM server:
-
-```text
-TUI -> agent coordinator -> OpenAI-compatible model API
-                       -> structured read-only tools
-                       -> SQLite sessions and event log
-```
-
-The LLM server, such as [llama.cpp](https://github.com/ggml-org/llama.cpp), is
-not managed by Spark. Spark only reads its connection configuration. Model
-output is streamed, accumulated as an event history, and rendered as Markdown
-while it arrives.
-
-Tools execute automatically, but they are capabilities rather than arbitrary
-shell commands. Git operations will be exposed through a dedicated allowlisted
-tool. Other useful analysis operations, such as filtering or extracting lines,
-will be implemented directly rather than by exposing `bash`, `awk`, or a
-generic command runner.
 
 ## Technology choices
 
@@ -113,16 +88,21 @@ expand Spark's read-only capabilities.
 
 ## Configuration
 
-The `.sparkrc` file controls runtime defaults. The tool-call round limit is
-configurable per user request and defaults to 8:
+The `.sparkrc` file controls runtime defaults. Spark bounds exploration with a
+tool-call pass limit, a per-pass call limit, and a total call limit:
 
 ```yaml
-tool_round_limit: 8
+tool_round_limit: 3
+max_tool_calls_per_round: 4
+max_tool_calls: 8
 ```
 
-The environment variable `SPARK_TOOL_ROUND_LIMIT` overrides the file setting.
-When the limit is reached, Spark asks the model to produce a final answer from
-the evidence already gathered instead of treating the limit itself as an error.
+The environment variables `SPARK_TOOL_ROUND_LIMIT`,
+`SPARK_MAX_TOOL_CALLS_PER_ROUND`, and `SPARK_MAX_TOOL_CALLS` override the file
+settings. A pass is one model response followed by its tool results. Limits
+are enforced by Spark even if the model emits more calls than permitted; when
+the budget is reached, Spark asks the model to produce a final answer from the
+evidence already gathered.
 
 ## Target languages
 
