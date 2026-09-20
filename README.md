@@ -89,6 +89,12 @@ Spark will not initially provide:
 The repository is currently a project scaffold; the architecture above
 describes the intended direction rather than implemented functionality.
 
+### Out of scope
+
+- WebSearch - this is something the user can do themselves and exposes prompt
+  injections or false information that may be difficult for the model to
+  discern.
+
 ## Skills
 
 Spark supports explicit Agent Skills. Skills are directories containing a
