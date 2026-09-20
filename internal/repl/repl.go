@@ -47,11 +47,19 @@ type Event struct {
 type Config struct {
 	Model          string
 	SystemPrompt   string
+	Environment    Environment
+	Now            func() time.Time
 	QueueLimit     int
 	ContextLimit   int
 	ToolRoundLimit int
 	RequestTimeout time.Duration
 	Tools          *tools.Registry
+}
+
+type Environment struct {
+	WorkingDirectory string
+	IsGitRepository  bool
+	Platform         string
 }
 
 type SkillUse struct {
@@ -112,6 +120,9 @@ func New(client llm.Client, config Config) *Coordinator {
 	}
 	if config.RequestTimeout <= 0 {
 		config.RequestTimeout = defaultRequestTimeout
+	}
+	if config.Now == nil {
+		config.Now = time.Now
 	}
 
 	c := &Coordinator{
@@ -255,8 +266,15 @@ func (c *Coordinator) next() (request, context.Context, bool) {
 func (c *Coordinator) process(req request, ctx context.Context) {
 	c.mu.Lock()
 	messages := make([]llm.Message, 0, len(c.transcript)+len(req.skillUses)+2)
-	if c.config.SystemPrompt != "" {
-		messages = append(messages, llm.Message{Role: "system", Content: llm.StringContent(c.config.SystemPrompt)})
+	systemPrompt := c.config.SystemPrompt
+	if environment := formatEnvironment(c.config.Environment, c.config.Now()); environment != "" {
+		if systemPrompt != "" {
+			systemPrompt += "\n\n"
+		}
+		systemPrompt += environment
+	}
+	if systemPrompt != "" {
+		messages = append(messages, llm.Message{Role: "system", Content: llm.StringContent(systemPrompt)})
 	}
 	messages = append(messages, c.transcript...)
 	messages = append(messages, llm.Message{Role: "user", Content: llm.StringContent(withSkills(req.content, req.skillUses))})
@@ -414,6 +432,31 @@ func cloneRequest(request llm.Request) llm.Request {
 	return clone
 }
 
+func formatEnvironment(environment Environment, now time.Time) string {
+	if environment.WorkingDirectory == "" && environment.Platform == "" {
+		return ""
+	}
+
+	gitRepository := "no"
+	if environment.IsGitRepository {
+		gitRepository = "yes"
+	}
+	location := now.Location().String()
+	if location == "" {
+		location = "Local"
+	}
+
+	return fmt.Sprintf("<env>\n  Working directory: %s\n  Is directory a git repo: %s\n  Platform: %s\n  Today's date: %s\n  Local time: %s\n  Timezone: %s (%s)\n</env>",
+		environment.WorkingDirectory,
+		gitRepository,
+		environment.Platform,
+		now.Format("Mon Jan 2 2006"),
+		now.Format("15:04 MST"),
+		location,
+		now.Format("MST -0700"),
+	)
+}
+
 func withSkills(content string, skills []SkillUse) string {
 	if len(skills) == 0 {
 		return content
@@ -471,9 +514,6 @@ func (c *Coordinator) readStream(ctx context.Context, requestID uint64, stream l
 				call.Name = fragment.Name
 			}
 			call.Arguments += fragment.Arguments
-		}
-		if delta.Done {
-			return response.String(), assembleToolCalls(fragments), nil
 		}
 		if err := ctx.Err(); err != nil {
 			return response.String(), nil, err

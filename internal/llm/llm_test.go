@@ -203,6 +203,7 @@ func TestOpenAIClientStreamsToolCallsAndUsage(t *testing.T) {
 		secondJSON, _ := json.Marshal(second)
 		_, _ = fmt.Fprintf(w, "data: %s\n\n", firstJSON)
 		_, _ = fmt.Fprintf(w, "data: %s\n\n", secondJSON)
+		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n")
 		_, _ = io.WriteString(w, "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":5,\"total_tokens\":17}}\n\n")
 		_, _ = io.WriteString(w, "data: [DONE]\n\n")
 	}))
@@ -231,6 +232,10 @@ func TestOpenAIClientStreamsToolCallsAndUsage(t *testing.T) {
 	second, err := stream.Next()
 	if err != nil || len(second.ToolCall) != 1 || second.ToolCall[0].Arguments != ".txt\"}" {
 		t.Fatalf("second delta = %+v, err = %v", second, err)
+	}
+	finished, err := stream.Next()
+	if err != nil || !finished.Done {
+		t.Fatalf("finish delta = %+v, err = %v", finished, err)
 	}
 	usage, err := stream.Next()
 	if err != nil || usage.Usage == nil || usage.Usage.TotalTokens != 17 {

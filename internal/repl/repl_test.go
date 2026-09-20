@@ -144,6 +144,51 @@ func TestCoordinatorStreamsAndBuildsConversationHistory(t *testing.T) {
 	}
 }
 
+func TestCoordinatorAddsRuntimeEnvironmentToSystemPrompt(t *testing.T) {
+	client := newFakeClient()
+	client.streams <- &fakeStream{deltas: []string{"done"}}
+	coordinator := New(client, Config{
+		Model:        "test-model",
+		SystemPrompt: "be concise",
+		Environment: Environment{
+			WorkingDirectory: "/workspace/project",
+			IsGitRepository:  true,
+			Platform:         "linux",
+		},
+		Now: func() time.Time {
+			return time.Date(2026, time.September, 20, 14, 35, 0, 0, time.FixedZone("BST", 3600))
+		},
+	})
+	defer coordinator.Close()
+
+	id, err := coordinator.Submit("inspect this")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitForEvent(t, coordinator.Events(), EventCompleted, id)
+
+	request := client.request(0)
+	if len(request.Messages) != 2 || request.Messages[0].Role != "system" || request.Messages[0].Content == nil {
+		t.Fatalf("request messages = %+v", request.Messages)
+	}
+	content := *request.Messages[0].Content
+	for _, expected := range []string{
+		"be concise",
+		"<env>",
+		"Working directory: /workspace/project",
+		"Is directory a git repo: yes",
+		"Platform: linux",
+		"Today's date: Sun Sep 20 2026",
+		"Local time: 14:35 BST",
+		"Timezone: BST (BST +0100)",
+		"</env>",
+	} {
+		if !strings.Contains(content, expected) {
+			t.Fatalf("system prompt missing %q: %q", expected, content)
+		}
+	}
+}
+
 func TestCoordinatorActivatesSkillsForOneRequest(t *testing.T) {
 	client := newFakeClient()
 	client.streams <- &fakeStream{deltas: []string{"done"}}
@@ -268,10 +313,12 @@ func TestCoordinatorExecutesToolCallsAndContinuesConversation(t *testing.T) {
 	client := newFakeClient()
 	client.streams <- &deltaStream{deltas: []llm.Delta{
 		{ToolCall: []llm.ToolCallDelta{{Index: 0, ID: "call_1", Name: "Read", Arguments: `{"filePath":"notes.txt"}`}}},
+		{Done: true},
 		{Usage: &llm.Usage{TotalTokens: 12}},
 	}}
 	client.streams <- &deltaStream{deltas: []llm.Delta{
 		{Content: "finished"},
+		{Done: true},
 		{Usage: &llm.Usage{TotalTokens: 20}},
 	}}
 

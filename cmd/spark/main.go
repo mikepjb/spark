@@ -3,7 +3,10 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strings"
 
 	"github.com/mikepjb/spark/internal/commands"
 	"github.com/mikepjb/spark/internal/config"
@@ -59,8 +62,13 @@ func main() {
 	}
 
 	coordinator := repl.New(currentModel.Client, repl.Config{
-		Model:          currentModel.Model,
-		SystemPrompt:   cfg.SystemPrompt,
+		Model:        currentModel.Model,
+		SystemPrompt: cfg.SystemPrompt,
+		Environment: repl.Environment{
+			WorkingDirectory: workspace,
+			IsGitRepository:  isGitRepository(workspace),
+			Platform:         runtime.GOOS,
+		},
 		QueueLimit:     cfg.QueueLimit,
 		ContextLimit:   cfg.ContextLimit,
 		ToolRoundLimit: cfg.ToolRoundLimit,
@@ -84,6 +92,11 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Alas, there's been an error: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+func isGitRepository(root string) bool {
+	output, err := exec.Command("git", "-C", root, "rev-parse", "--is-inside-work-tree").Output()
+	return err == nil && strings.TrimSpace(string(output)) == "true"
 }
 
 func skillRoots(workspace string, configured []string) ([]string, error) {
