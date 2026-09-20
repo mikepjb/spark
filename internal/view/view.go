@@ -116,6 +116,7 @@ type keyMap struct {
 	ScrollUp         key.Binding
 	ScrollDown       key.Binding
 	SaveHistory      key.Binding
+	Paste            key.Binding
 }
 
 func newKeyMap() keyMap {
@@ -168,6 +169,10 @@ func newKeyMap() keyMap {
 			key.WithKeys("ctrl+x"),
 			key.WithHelp("ctrl+x", "save history"),
 		),
+		Paste: key.NewBinding(
+			key.WithKeys("ctrl+v"),
+			key.WithHelp("ctrl+v", "paste from clipboard"),
+		),
 	}
 }
 
@@ -178,7 +183,7 @@ func (k keyMap) ShortHelp() []key.Binding {
 func (k keyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Submit, k.InsertNewline, k.Help, k.Settings},
-		{k.ScrollUp, k.ScrollDown, k.SaveHistory, k.Close, k.Quit},
+		{k.ScrollUp, k.ScrollDown, k.SaveHistory, k.Close, k.Quit, k.Paste},
 	}
 }
 
@@ -483,15 +488,6 @@ func (m *model) handleReplEvent(event repl.Event) tea.Cmd {
 		m.notice = "message queue is full"
 	}
 
-	return nil
-}
-
-func (m *model) messageByID(id uint64, role string) *chatMessage {
-	for i := len(m.history) - 1; i >= 0; i-- {
-		if m.history[i].id == id && m.history[i].role == role {
-			return &m.history[i]
-		}
-	}
 	return nil
 }
 

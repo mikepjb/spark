@@ -47,11 +47,12 @@ type Event struct {
 type Config struct {
 	Model          string
 	SystemPrompt   string
+	AgentPrompt    string
 	Environment    Environment
 	Now            func() time.Time
 	QueueLimit     int
 	ContextLimit   int
-	ToolRoundLimit int
+	ToolCallLimit  int
 	RequestTimeout time.Duration
 	Tools          *tools.Registry
 }
@@ -79,7 +80,7 @@ var (
 )
 
 const (
-	defaultToolRoundLimit = 8
+	defaultToolCallLimit  = 8
 	defaultRequestTimeout = 10 * time.Minute
 )
 
@@ -115,8 +116,8 @@ func New(client llm.Client, config Config) *Coordinator {
 	if config.ContextLimit < 1 {
 		config.ContextLimit = 64000
 	}
-	if config.ToolRoundLimit < 1 {
-		config.ToolRoundLimit = defaultToolRoundLimit
+	if config.ToolCallLimit < 1 {
+		config.ToolCallLimit = defaultToolCallLimit
 	}
 	if config.RequestTimeout <= 0 {
 		config.RequestTimeout = defaultRequestTimeout
@@ -277,7 +278,7 @@ func (c *Coordinator) process(req request, ctx context.Context) {
 		messages = append(messages, llm.Message{Role: "system", Content: llm.StringContent(systemPrompt)})
 	}
 	messages = append(messages, c.transcript...)
-	messages = append(messages, llm.Message{Role: "user", Content: llm.StringContent(withSkills(req.content, req.skillUses))})
+	messages = append(messages, llm.Message{Role: "user", Content: llm.StringContent(withAgentPrompt(c.config.AgentPrompt, withSkills(req.content, req.skillUses)))})
 	client := c.client
 	model := c.config.Model
 	c.mu.Unlock()
@@ -293,10 +294,16 @@ func (c *Coordinator) process(req request, ctx context.Context) {
 	c.emit(Event{Kind: EventStarted, RequestID: req.id})
 
 	var intermediate []llm.Message
-	for round := 0; ; round++ {
+	callsUsed := 0
+	for {
+		remaining := c.config.ToolCallLimit - callsUsed
+		requestMessages := messages
+		if c.config.Tools != nil {
+			requestMessages = withToolBudget(messages, remaining)
+		}
 		completionRequest := llm.Request{
 			Model:         model,
-			Messages:      messages,
+			Messages:      requestMessages,
 			Stream:        true,
 			Tools:         toolDefinitions(c.config.Tools),
 			StreamOptions: &llm.StreamOptions{IncludeUsage: true},
@@ -326,7 +333,28 @@ func (c *Coordinator) process(req request, ctx context.Context) {
 			c.complete(req, response, intermediate)
 			return
 		}
-		if round >= c.config.ToolRoundLimit {
+		accepted := calls
+		truncated := len(accepted) > remaining
+		if truncated {
+			accepted = accepted[:remaining]
+		}
+
+		assistant := llm.Message{Role: "assistant", Content: contentOrNil(response), ToolCalls: assistantToolCalls(accepted)}
+		messages = append(messages, assistant)
+		intermediate = append(intermediate, assistant)
+		for _, call := range accepted {
+			c.emit(Event{Kind: EventToolStarted, RequestID: req.id, ToolCallID: call.ID, Content: call.Name})
+			result := tools.Result{Summary: "tool unavailable", Content: "tool execution is unavailable", Failed: true}
+			if c.config.Tools != nil {
+				result = c.config.Tools.Execute(ctx, call)
+			}
+			c.emit(Event{Kind: EventToolCompleted, RequestID: req.id, ToolCallID: call.ID, Content: result.Summary, Failed: result.Failed})
+			toolMessage := llm.Message{Role: "tool", Content: llm.StringContent(result.Content), ToolCallID: call.ID}
+			messages = append(messages, toolMessage)
+			intermediate = append(intermediate, toolMessage)
+		}
+		callsUsed += len(accepted)
+		if truncated || callsUsed >= c.config.ToolCallLimit {
 			finalResponse, err := c.finalizeWithoutTools(ctx, req.id, client, model, messages)
 			if err != nil {
 				if errors.Is(ctx.Err(), context.Canceled) {
@@ -339,21 +367,6 @@ func (c *Coordinator) process(req request, ctx context.Context) {
 			c.complete(req, finalResponse, intermediate)
 			return
 		}
-
-		assistant := llm.Message{Role: "assistant", Content: contentOrNil(response), ToolCalls: assistantToolCalls(calls)}
-		messages = append(messages, assistant)
-		intermediate = append(intermediate, assistant)
-		for _, call := range calls {
-			c.emit(Event{Kind: EventToolStarted, RequestID: req.id, ToolCallID: call.ID, Content: call.Name})
-			result := tools.Result{Summary: "tool unavailable", Content: "tool execution is unavailable", Failed: true}
-			if c.config.Tools != nil {
-				result = c.config.Tools.Execute(ctx, call)
-			}
-			c.emit(Event{Kind: EventToolCompleted, RequestID: req.id, ToolCallID: call.ID, Content: result.Summary, Failed: result.Failed})
-			toolMessage := llm.Message{Role: "tool", Content: llm.StringContent(result.Content), ToolCallID: call.ID}
-			messages = append(messages, toolMessage)
-			intermediate = append(intermediate, toolMessage)
-		}
 	}
 }
 
@@ -361,7 +374,7 @@ func (c *Coordinator) finalizeWithoutTools(ctx context.Context, requestID uint64
 	finalMessages := append([]llm.Message(nil), messages...)
 	finalMessages = append(finalMessages, llm.Message{
 		Role:    "user",
-		Content: llm.StringContent("The configured tool-call round limit has been reached. Using only the evidence gathered so far, provide the best answer to the original request now. Do not request or use any more tools."),
+		Content: llm.StringContent("The configured tool-call limit has been reached. Using only the evidence gathered so far, provide the best answer to the original request now. Do not request or use any more tools."),
 	})
 	request := llm.Request{
 		Model:         model,
@@ -478,6 +491,25 @@ func withSkills(content string, skills []SkillUse) string {
 	builder.WriteString(content)
 	builder.WriteString("\n--- END USER REQUEST ---")
 	return builder.String()
+}
+
+func withAgentPrompt(agentPrompt, content string) string {
+	if strings.TrimSpace(agentPrompt) == "" {
+		return content
+	}
+	return "--- USER AGENT GUIDANCE ---\n" + strings.TrimSpace(agentPrompt) + "\n--- END USER AGENT GUIDANCE ---\n\n" + content
+}
+
+func withToolBudget(messages []llm.Message, remaining int) []llm.Message {
+	result := make([]llm.Message, len(messages))
+	copy(result, messages)
+	budget := fmt.Sprintf("\n\n<tool-budget>\nTool calls remaining for this request: %d. Use only the fewest calls needed. This limit is enforced by Spark.\n</tool-budget>", remaining)
+	if len(result) > 0 && result[0].Role == "system" && result[0].Content != nil {
+		content := *result[0].Content + budget
+		result[0].Content = llm.StringContent(content)
+		return result
+	}
+	return append([]llm.Message{{Role: "system", Content: llm.StringContent(strings.TrimSpace(budget))}}, result...)
 }
 
 func (c *Coordinator) readStream(ctx context.Context, requestID uint64, stream llm.Stream) (string, []llm.ToolCall, error) {

@@ -26,9 +26,9 @@ config:
 	( set -C; printf '%s\n' \
 		'endpoint: http://127.0.0.1:8080' \
 		'model: ""' \
-		'system_prompt: ""' \
 		'queue_limit: 5' \
 		'context_limit: 64000' \
+		'tool_call_limit: 8' \
 		> "$$config_file" \
 	) || { \
 		echo "Could not create Spark config: $$config_file" >&2; \

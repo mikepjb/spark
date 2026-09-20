@@ -1,10 +1,12 @@
 package view
 
 import (
+	"fmt"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
+	"github.com/atotto/clipboard"
 	"github.com/mikepjb/spark/internal/commands"
 )
 
@@ -103,6 +105,16 @@ func (m model) handleKeyPress(msg tea.KeyPressMsg) (model, tea.Cmd, bool) {
 			m.notice = err.Error()
 		} else {
 			m.notice = "history saved to " + historyExportFilename
+		}
+		return m, nil, true
+	}
+
+	if key.Matches(msg, m.keys.Paste) {
+		content, err := clipboard.ReadAll()
+		if err != nil {
+			m.notice = fmt.Sprintf("error accessing clipboard: %s", err)
+		} else {
+			m.input.SetValue(m.input.Value() + content)
 		}
 		return m, nil, true
 	}

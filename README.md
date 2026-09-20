@@ -16,6 +16,10 @@ running comfortably on a consumer laptop.
 - distinguish between a 'system prompt' and the users agents prompt.. there are
   some internal things to help drive minicpm5 that will be distinct from user
   agents.md
+- after the agent has done all the calls/responded we should have a 'worked for
+  9m 51s' or however long the time elapsed has taken.
+- look at how pi/opencode/codex to their glob/grep/reads to see if there are any
+  tricks we can pull to make this more efficient.
 
 ## How this might be useful
 
@@ -88,21 +92,23 @@ expand Spark's read-only capabilities.
 
 ## Configuration
 
-The `.sparkrc` file controls runtime defaults. Spark bounds exploration with a
-tool-call pass limit, a per-pass call limit, and a total call limit:
+The `.sparkrc` file controls runtime defaults. Spark bounds each user request
+with one total tool-call limit:
 
 ```yaml
-tool_round_limit: 3
-max_tool_calls_per_round: 4
-max_tool_calls: 8
+tool_call_limit: 8
 ```
 
-The environment variables `SPARK_TOOL_ROUND_LIMIT`,
-`SPARK_MAX_TOOL_CALLS_PER_ROUND`, and `SPARK_MAX_TOOL_CALLS` override the file
-settings. A pass is one model response followed by its tool results. Limits
-are enforced by Spark even if the model emits more calls than permitted; when
-the budget is reached, Spark asks the model to produce a final answer from the
-evidence already gathered.
+The environment variable `SPARK_TOOL_CALL_LIMIT` overrides the file setting.
+The limit counts calls across all model/tool rounds for one user request. If a
+model emits more calls than remain, Spark executes only the remaining calls and
+then asks for a final answer without tools.
+
+Spark's internal system prompt is kept separate from user-level guidance. If
+present, Spark loads user guidance from `~/.agents/AGENTS.md`, falling back to
+`~/.codex/AGENTS.md`. Activated skills and the user request are also included
+as user-level content. The old `system_prompt` configuration key is no longer
+supported; put personal workflow guidance in the user-level `AGENTS.md` file.
 
 ## Target languages
 

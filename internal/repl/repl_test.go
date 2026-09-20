@@ -353,6 +353,10 @@ func TestCoordinatorExecutesToolCallsAndContinuesConversation(t *testing.T) {
 	if len(request.Tools) != 7 {
 		t.Fatalf("tool definition count = %d, want 7", len(request.Tools))
 	}
+	firstRequest := client.request(0)
+	if firstRequest.Messages[0].Content == nil || !strings.Contains(*firstRequest.Messages[0].Content, "Tool calls remaining for this request: 8") {
+		t.Fatalf("initial tool budget prompt = %+v", firstRequest.Messages)
+	}
 	if len(request.Messages) != 4 {
 		t.Fatalf("second request messages = %+v", request.Messages)
 	}
@@ -372,7 +376,7 @@ func TestCoordinatorExecutesToolCallsAndContinuesConversation(t *testing.T) {
 	}
 }
 
-func TestCoordinatorFinalizesAfterToolRoundLimit(t *testing.T) {
+func TestCoordinatorFinalizesAfterToolCallLimit(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "notes.txt"), []byte("tool result\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -385,10 +389,9 @@ func TestCoordinatorFinalizesAfterToolRoundLimit(t *testing.T) {
 	toolCall := llm.ToolCallDelta{Index: 0, ID: "call_1", Name: "Read", Arguments: `{"filePath":"notes.txt"}`}
 	client := newFakeClient()
 	client.streams <- &deltaStream{deltas: []llm.Delta{{ToolCall: []llm.ToolCallDelta{toolCall}}}}
-	client.streams <- &deltaStream{deltas: []llm.Delta{{ToolCall: []llm.ToolCallDelta{{Index: 0, ID: "call_2", Name: "Read", Arguments: `{"filePath":"not-executed.txt"}`}}}}}
 	client.streams <- &deltaStream{deltas: []llm.Delta{{Content: "final answer"}}}
 
-	coordinator := New(client, Config{Model: "test-model", Tools: registry, ToolRoundLimit: 1})
+	coordinator := New(client, Config{Model: "test-model", Tools: registry, ToolCallLimit: 1})
 	defer coordinator.Close()
 	id, err := coordinator.Submit("inspect notes")
 	if err != nil {
@@ -409,15 +412,95 @@ func TestCoordinatorFinalizesAfterToolRoundLimit(t *testing.T) {
 	case <-time.After(100 * time.Millisecond):
 	}
 
-	finalRequest := client.request(2)
+	finalRequest := client.request(1)
 	if len(finalRequest.Tools) != 0 {
 		t.Fatalf("final request exposed tools: %+v", finalRequest.Tools)
 	}
-	if len(finalRequest.Messages) != 4 || finalRequest.Messages[3].Role != "user" || finalRequest.Messages[3].Content == nil || !strings.Contains(*finalRequest.Messages[3].Content, "round limit") {
+	if len(finalRequest.Messages) != 4 || finalRequest.Messages[3].Role != "user" || finalRequest.Messages[3].Content == nil || !strings.Contains(*finalRequest.Messages[3].Content, "tool-call limit") {
 		t.Fatalf("final request messages = %+v", finalRequest.Messages)
 	}
-	if history := coordinator.APIHistory(); len(history) != 3 {
-		t.Fatalf("API history length = %d, want 3", len(history))
+	if history := coordinator.APIHistory(); len(history) != 2 {
+		t.Fatalf("API history length = %d, want 2", len(history))
+	}
+}
+
+func TestCoordinatorTruncatesToolBatchAtRemainingCallLimit(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{"first.txt", "second.txt", "not-executed.txt"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(name+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	registry, err := tools.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	client := newFakeClient()
+	client.streams <- &deltaStream{deltas: []llm.Delta{{ToolCall: []llm.ToolCallDelta{
+		{Index: 0, ID: "call_1", Name: "Read", Arguments: `{"filePath":"first.txt"}`},
+		{Index: 1, ID: "call_2", Name: "Read", Arguments: `{"filePath":"second.txt"}`},
+		{Index: 2, ID: "call_3", Name: "Read", Arguments: `{"filePath":"not-executed.txt"}`},
+	}}}}
+	client.streams <- &deltaStream{deltas: []llm.Delta{{Content: "final answer"}}}
+
+	coordinator := New(client, Config{Model: "test-model", Tools: registry, ToolCallLimit: 2})
+	defer coordinator.Close()
+	id, err := coordinator.Submit("inspect the files")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitForEvent(t, coordinator.Events(), EventQueued, id)
+	waitForEvent(t, coordinator.Events(), EventStarted, id)
+	waitForEvent(t, coordinator.Events(), EventToolStarted, id)
+	waitForEvent(t, coordinator.Events(), EventToolCompleted, id)
+	waitForEvent(t, coordinator.Events(), EventToolStarted, id)
+	waitForEvent(t, coordinator.Events(), EventToolCompleted, id)
+	waitForEvent(t, coordinator.Events(), EventCompleted, id)
+
+	if request := client.request(1); len(request.Tools) != 0 {
+		t.Fatalf("final request exposed tools: %+v", request.Tools)
+	}
+	request := client.request(1)
+	if len(request.Messages) != 5 {
+		t.Fatalf("final request messages = %+v", request.Messages)
+	}
+	if len(request.Messages[1].ToolCalls) != 2 {
+		t.Fatalf("assistant tool calls = %+v", request.Messages[1].ToolCalls)
+	}
+	if request.Messages[1].ToolCalls[0].ID != "call_1" || request.Messages[1].ToolCalls[1].ID != "call_2" {
+		t.Fatalf("assistant tool calls = %+v", request.Messages[1].ToolCalls)
+	}
+	if request.Messages[2].ToolCallID != "call_1" || request.Messages[3].ToolCallID != "call_2" {
+		t.Fatalf("tool results = %+v", request.Messages[2:4])
+	}
+}
+
+func TestCoordinatorAddsUserAgentPromptOutsideSystemMessage(t *testing.T) {
+	client := newFakeClient()
+	client.streams <- &fakeStream{deltas: []string{"done"}}
+	coordinator := New(client, Config{
+		Model:        "test-model",
+		SystemPrompt: "internal steering",
+		AgentPrompt:  "personal guidance",
+	})
+	defer coordinator.Close()
+
+	id, err := coordinator.Submit("inspect this")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitForEvent(t, coordinator.Events(), EventCompleted, id)
+
+	request := client.request(0)
+	if len(request.Messages) != 2 {
+		t.Fatalf("request messages = %+v", request.Messages)
+	}
+	if request.Messages[0].Content == nil || *request.Messages[0].Content != "internal steering" {
+		t.Fatalf("system message = %+v", request.Messages[0])
+	}
+	if request.Messages[1].Content == nil || !strings.Contains(*request.Messages[1].Content, "personal guidance") || !strings.Contains(*request.Messages[1].Content, "inspect this") {
+		t.Fatalf("user message = %+v", request.Messages[1])
 	}
 }
 
