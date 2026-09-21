@@ -5,6 +5,14 @@ keep people in the loop and to expose only tightly controlled, read-only tools.
 The initial target is a small local model such as a quantized Qwen 2B or 4B,
 running comfortably on a consumer laptop.
 
+## How to use this harness
+
+- `make install` to compile and install the `spark` binary.
+- If you want to ask questions about a particular library, 2B is not big so
+  MiniCPM5 is not likely to have it - instead cloning the library repo and
+  asking spark inside the repo seems to generate great results (using HTMX
+  events as an example).
+
 ## Model Targets
 
 - Qwen 3.5 2B
