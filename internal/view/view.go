@@ -207,6 +207,7 @@ type model struct {
 	contextLimit    int
 	windowWidth     int
 	windowHeight    int
+	currentDir      string
 	markdown        markdownRenderer
 	backend         Backend
 	commands        *commands.Engine
@@ -275,7 +276,9 @@ func Start(backend Backend, modelName string, contextLimit int, commandEngine *c
 	if backend != nil {
 		defer backend.Close()
 	}
+
 	m := newModel(backend, modelName, commandEngine)
+	m.currentDir = filepath.Dir(workspace)
 	m.historyFilePath = filepath.Join(workspace, historyExportFilename)
 	if contextLimit > 0 {
 		// The first context event will refresh this value with the server's
@@ -790,7 +793,7 @@ func (m model) statusView() string {
 		notice = " · " + m.notice
 	}
 
-	return statusStyle.Render(fmt.Sprintf("%smodel: %s · context: %s%s%s", activity, m.modelName, context, queue, notice))
+	return statusStyle.Render(fmt.Sprintf("%smodel: %s · %s · context: %s%s%s", activity, m.modelName, m.currentDir, context, queue, notice))
 }
 
 func formatTokenCount(tokens int) string {

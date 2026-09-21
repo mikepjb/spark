@@ -507,9 +507,10 @@ func TestStatusShowsBusySpinnerAndContext(t *testing.T) {
 	m.busy = true
 	m.contextUsed = 128
 	m.contextLimit = 4096
+	m.currentDir = "test-project"
 
 	status := m.statusView()
-	for _, expected := range []string{"model: not connected", "context: 128/4k", "thinking"} {
+	for _, expected := range []string{"model: not connected", "test-project", "context: 128/4k", "thinking"} {
 		if expected == "thinking" {
 			if strings.Contains(status, expected) {
 				t.Fatalf("status %q unexpectedly contained %q", status, expected)

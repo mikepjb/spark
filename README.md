@@ -32,6 +32,9 @@ running comfortably on a consumer laptop.
 
 ## New features to be added
 
+- Remaining follow-up: Spark needs a revision-range Git tool to review committed feature branches
+  against main...HEAD or master...HEAD. Configure Spark’s skill_paths to agent/skills/spark or
+  copy this root into its .agents/skills.
 - Kagi API for WebSearch tool call
 - we should probably give the model some additional context like the time of
   day.. their present working directory? and check other harnesses to see what

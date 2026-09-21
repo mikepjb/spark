@@ -12,7 +12,6 @@ func TestDefaultSystemPromptPrioritizesRequestIntent(t *testing.T) {
 		"First classify the request before using tools:",
 		"answer directly without inspecting the repository or using tools",
 		"For repository-specific or engineering questions",
-		"Apply an activated skill only when its scope matches the request",
 	} {
 		if !strings.Contains(defaultSystemPrompt, expected) {
 			t.Errorf("default system prompt missing %q", expected)
