@@ -44,10 +44,13 @@ func main() {
 		os.Exit(1)
 	}
 
-	filePaths, err := files.List(workspace)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Alas, there's been an error indexing workspace files: %v\n", err)
-		os.Exit(1)
+	var filePaths []string
+	if !isHomeDirectory(workspace) {
+		filePaths, err = files.List(workspace)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Alas, there's been an error indexing workspace files: %v\n", err)
+			os.Exit(1)
+		}
 	}
 
 	skillRoots, err := skillRoots(workspace, cfg.SkillPaths)
@@ -121,6 +124,26 @@ func userAgentPromptFromHome(home string) (string, error) {
 		}
 	}
 	return "", nil
+}
+
+func isHomeDirectory(workspace string) bool {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return false
+	}
+	return sameDirectory(workspace, home)
+}
+
+func sameDirectory(first, second string) bool {
+	firstInfo, err := os.Stat(first)
+	if err != nil {
+		return false
+	}
+	secondInfo, err := os.Stat(second)
+	if err != nil {
+		return false
+	}
+	return os.SameFile(firstInfo, secondInfo)
 }
 
 func isGitRepository(root string) bool {

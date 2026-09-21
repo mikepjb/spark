@@ -86,3 +86,31 @@ func TestUserAgentPromptAllowsMissingFile(t *testing.T) {
 		t.Fatalf("guidance = %q, want empty", got)
 	}
 }
+
+func TestSameDirectory(t *testing.T) {
+	home := t.TempDir()
+
+	if !sameDirectory(home, home) {
+		t.Fatal("expected the home directory to be recognized")
+	}
+
+	project := filepath.Join(home, "project")
+	if err := os.Mkdir(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if sameDirectory(project, home) {
+		t.Fatal("did not expect a child directory to be recognized as home")
+	}
+}
+
+func TestSameDirectoryFollowsSymlinks(t *testing.T) {
+	home := t.TempDir()
+	link := filepath.Join(t.TempDir(), "home-link")
+	if err := os.Symlink(home, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	if !sameDirectory(link, home) {
+		t.Fatal("expected a symlink to the home directory to be recognized")
+	}
+}
