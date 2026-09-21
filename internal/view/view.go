@@ -278,7 +278,7 @@ func Start(backend Backend, modelName string, contextLimit int, commandEngine *c
 	}
 
 	m := newModel(backend, modelName, commandEngine)
-	m.currentDir = filepath.Dir(workspace)
+	m.currentDir = filepath.Base(workspace)
 	m.historyFilePath = filepath.Join(workspace, historyExportFilename)
 	if contextLimit > 0 {
 		// The first context event will refresh this value with the server's
