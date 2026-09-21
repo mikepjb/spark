@@ -3,8 +3,22 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+func TestDefaultSystemPromptPrioritizesRequestIntent(t *testing.T) {
+	for _, expected := range []string{
+		"First classify the request before using tools:",
+		"answer directly without inspecting the repository or using tools",
+		"For repository-specific or engineering questions",
+		"Apply an activated skill only when its scope matches the request",
+	} {
+		if !strings.Contains(defaultSystemPrompt, expected) {
+			t.Errorf("default system prompt missing %q", expected)
+		}
+	}
+}
 
 func TestLoadFromFileAppliesEnvironmentOverrides(t *testing.T) {
 	path := filepath.Join(t.TempDir(), ".sparkrc")

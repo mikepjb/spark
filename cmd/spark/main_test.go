@@ -46,13 +46,7 @@ func TestUserAgentPromptPrefersGenericPath(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(home, ".agents"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(filepath.Join(home, ".codex"), 0o755); err != nil {
-		t.Fatal(err)
-	}
 	if err := os.WriteFile(filepath.Join(home, ".agents", "AGENTS.md"), []byte("generic guidance\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(home, ".codex", "AGENTS.md"), []byte("codex guidance\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -65,7 +59,7 @@ func TestUserAgentPromptPrefersGenericPath(t *testing.T) {
 	}
 }
 
-func TestUserAgentPromptFallsBackToCodexPath(t *testing.T) {
+func TestUserAgentPromptIgnoresCodexPath(t *testing.T) {
 	home := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(home, ".codex"), 0o755); err != nil {
 		t.Fatal(err)
@@ -78,8 +72,8 @@ func TestUserAgentPromptFallsBackToCodexPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != "codex guidance" {
-		t.Fatalf("guidance = %q", got)
+	if got != "" {
+		t.Fatalf("guidance = %q, want empty", got)
 	}
 }
 

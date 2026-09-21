@@ -143,10 +143,11 @@ model emits more calls than remain, Spark executes only the remaining calls and
 then asks for a final answer without tools.
 
 Spark's internal system prompt is kept separate from user-level guidance. If
-present, Spark loads user guidance from `~/.agents/AGENTS.md`, falling back to
-`~/.codex/AGENTS.md`. Activated skills and the user request are also included
-as user-level content. The old `system_prompt` configuration key is no longer
-supported; put personal workflow guidance in the user-level `AGENTS.md` file.
+present, Spark loads user guidance from `~/.agents/AGENTS.md`. Project-local
+`AGENTS.md` files are not loaded. Activated skills and the user request are
+also included as user-level content. The old `system_prompt` configuration key
+is no longer supported; put personal workflow guidance in the user-level
+`AGENTS.md` file.
 
 ## Target languages
 
