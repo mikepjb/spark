@@ -371,7 +371,7 @@ func TestCoordinatorExecutesToolCallsAndContinuesConversation(t *testing.T) {
 	if len(apiHistory) != 2 {
 		t.Fatalf("API history length = %d, want 2", len(apiHistory))
 	}
-	if len(apiHistory[1].Messages) != 4 || apiHistory[1].Messages[2].ToolCalls[0].Function.Arguments != `{"filePath":"notes.txt"}` {
+	if len(apiHistory[1].Request.Messages) != 4 || apiHistory[1].Request.Messages[2].ToolCalls[0].Function.Arguments != `{"filePath":"notes.txt"}` {
 		t.Fatalf("second API request = %+v", apiHistory[1])
 	}
 }
@@ -533,7 +533,7 @@ func TestCoordinatorRecordsAPIRequestBeforeStreamFailure(t *testing.T) {
 	waitForEvent(t, coordinator.Events(), EventFailed, id)
 
 	history := coordinator.APIHistory()
-	if len(history) != 1 || len(history[0].Messages) != 1 || history[0].Messages[0].Content == nil || *history[0].Messages[0].Content != "inspect this" {
+	if len(history) != 1 || len(history[0].Request.Messages) != 1 || history[0].Request.Messages[0].Content == nil || *history[0].Request.Messages[0].Content != "inspect this" {
 		t.Fatalf("API history = %+v", history)
 	}
 }

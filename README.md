@@ -138,9 +138,13 @@ with one total tool-call limit:
 
 ```yaml
 tool_call_limit: 8
+show_reasoning: true
 ```
 
 The environment variable `SPARK_TOOL_CALL_LIMIT` overrides the file setting.
+Reasoning content is shown in collapsed gray blocks by default; use `ctrl+r` to
+expand or contract all reasoning blocks. Set `show_reasoning: false` (or
+`SPARK_SHOW_REASONING=false`) to disable them.
 The limit counts calls across all model/tool rounds for one user request. If a
 model emits more calls than remain, Spark executes only the remaining calls and
 then asks for a final answer without tools.

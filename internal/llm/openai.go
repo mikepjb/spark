@@ -77,6 +77,46 @@ func (c *OpenAIClient) Complete(ctx context.Context, request Request) (Stream, e
 	return &stream{body: response.Body, scanner: newScanner(response.Body)}, nil
 }
 
+// DiscoverModel returns the single model advertised by llama.cpp's OpenAI-compatible API.
+func (c *OpenAIClient) DiscoverModel(ctx context.Context) (string, error) {
+	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodGet, c.modelsURL(), nil)
+	if err != nil {
+		return "", fmt.Errorf("create model discovery request: %w", err)
+	}
+	httpRequest.Header.Set("Accept", "application/json")
+	if c.apiKey != "" {
+		httpRequest.Header.Set("Authorization", "Bearer "+c.apiKey)
+	}
+
+	response, err := c.http.Do(httpRequest)
+	if err != nil {
+		return "", fmt.Errorf("request server models: %w", err)
+	}
+	defer func() { _ = response.Body.Close() }()
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		return "", fmt.Errorf("model discovery returned HTTP %d", response.StatusCode)
+	}
+	var result struct {
+		Data []struct {
+			ID      string `json:"id"`
+			OwnedBy string `json:"owned_by"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(io.LimitReader(response.Body, 64*1024)).Decode(&result); err != nil {
+		return "", fmt.Errorf("decode server models: %w", err)
+	}
+	models := make([]string, 0, len(result.Data))
+	for _, model := range result.Data {
+		if id := strings.TrimSpace(model.ID); id != "" && model.OwnedBy == "llamacpp" {
+			models = append(models, id)
+		}
+	}
+	if len(models) != 1 {
+		return "", fmt.Errorf("server returned %d model IDs; expected one", len(models))
+	}
+	return models[0], nil
+}
+
 func (c *OpenAIClient) completionURL() string {
 	if strings.HasSuffix(c.endpoint, "/v1/chat/completions") {
 		return c.endpoint
@@ -85,6 +125,16 @@ func (c *OpenAIClient) completionURL() string {
 		return c.endpoint + "/chat/completions"
 	}
 	return c.endpoint + "/v1/chat/completions"
+}
+
+func (c *OpenAIClient) modelsURL() string {
+	if strings.HasSuffix(c.endpoint, "/v1/chat/completions") {
+		return strings.TrimSuffix(c.endpoint, "/chat/completions") + "/models"
+	}
+	if strings.HasSuffix(c.endpoint, "/v1") {
+		return c.endpoint + "/models"
+	}
+	return c.endpoint + "/v1/models"
 }
 
 type stream struct {
@@ -115,10 +165,12 @@ func (s *stream) Next() (Delta, error) {
 		}
 
 		var response struct {
+			Model   string `json:"model"`
 			Choices []struct {
 				Delta struct {
-					Content   string `json:"content"`
-					ToolCalls []struct {
+					Content          string `json:"content"`
+					ReasoningContent string `json:"reasoning_content"`
+					ToolCalls        []struct {
 						Index    int    `json:"index"`
 						ID       string `json:"id"`
 						Function struct {
@@ -132,10 +184,10 @@ func (s *stream) Next() (Delta, error) {
 			Usage *Usage `json:"usage"`
 		}
 		if err := json.Unmarshal([]byte(payload), &response); err != nil {
-			return Delta{}, fmt.Errorf("decode streamed completion: %w", err)
+			return Delta{Raw: payload}, fmt.Errorf("decode streamed completion: %w", err)
 		}
 
-		var delta Delta
+		delta := Delta{Model: response.Model, Raw: payload}
 		if response.Usage != nil {
 			delta.Usage = response.Usage
 		}
@@ -146,7 +198,11 @@ func (s *stream) Next() (Delta, error) {
 			continue
 		}
 		delta.Content = response.Choices[0].Delta.Content
+		delta.ReasoningContent = response.Choices[0].Delta.ReasoningContent
 		delta.Done = response.Choices[0].FinishReason != nil
+		if response.Choices[0].FinishReason != nil {
+			delta.Finish = *response.Choices[0].FinishReason
+		}
 		for _, toolCall := range response.Choices[0].Delta.ToolCalls {
 			delta.ToolCall = append(delta.ToolCall, ToolCallDelta{
 				Index:     toolCall.Index,
@@ -155,7 +211,7 @@ func (s *stream) Next() (Delta, error) {
 				Arguments: toolCall.Function.Arguments,
 			})
 		}
-		if delta.Content == "" && len(delta.ToolCall) == 0 && delta.Usage == nil && !delta.Done {
+		if delta.Content == "" && delta.ReasoningContent == "" && len(delta.ToolCall) == 0 && delta.Usage == nil && !delta.Done && delta.Model == "" {
 			continue
 		}
 		return delta, nil

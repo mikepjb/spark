@@ -14,7 +14,7 @@ func (m model) saveHistory() error {
 		return fmt.Errorf("save history: export path is not configured")
 	}
 
-	var apiHistory []llm.Request
+	var apiHistory []llm.Exchange
 	if m.backend != nil {
 		apiHistory = m.backend.APIHistory()
 	}
@@ -28,21 +28,21 @@ func (m model) saveHistory() error {
 	return nil
 }
 
-func formatDebugLog(history []chatMessage, apiHistory []llm.Request) (string, error) {
+func formatDebugLog(history []chatMessage, apiHistory []llm.Exchange) (string, error) {
 	var builder strings.Builder
 	builder.WriteString(formatHistory(history))
-	builder.WriteString("\n## API requests\n")
+	builder.WriteString("\n## API exchanges\n")
 	if len(apiHistory) == 0 {
-		builder.WriteString("\nNo API requests recorded.\n")
+		builder.WriteString("\nNo API exchanges recorded.\n")
 		return builder.String(), nil
 	}
 
-	for i, request := range apiHistory {
-		data, err := json.MarshalIndent(request, "", "  ")
+	for i, exchange := range apiHistory {
+		data, err := json.MarshalIndent(exchange, "", "  ")
 		if err != nil {
-			return "", fmt.Errorf("encode API request %d: %w", i+1, err)
+			return "", fmt.Errorf("encode API exchange %d: %w", i+1, err)
 		}
-		fmt.Fprintf(&builder, "\n### Request %d\n\n```json\n%s\n```\n", i+1, data)
+		fmt.Fprintf(&builder, "\n### Exchange %d\n\n```json\n%s\n```\n", i+1, data)
 	}
 	return builder.String(), nil
 }

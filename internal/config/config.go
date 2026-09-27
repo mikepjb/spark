@@ -15,6 +15,7 @@ const (
 	defaultQueueSize     = 5
 	defaultContextLimit  = 64000
 	defaultToolCallLimit = 8
+	defaultShowReasoning = true
 	defaultPath          = ".sparkrc"
 
 	defaultSystemPrompt = `You are Spark, a local assistant with read-only software engineering tools.
@@ -54,6 +55,7 @@ type Config struct {
 	QueueLimit    int                       `yaml:"queue_limit"`
 	ContextLimit  int                       `yaml:"context_limit"`
 	ToolCallLimit int                       `yaml:"tool_call_limit"`
+	ShowReasoning bool                      `yaml:"show_reasoning"`
 	Providers     map[string]ProviderConfig `yaml:"providers"`
 	Models        map[string]ModelConfig    `yaml:"models"`
 	SkillPaths    []string                  `yaml:"skill_paths"`
@@ -84,6 +86,7 @@ func LoadFromFile(path string) (Config, error) {
 		QueueLimit:    defaultQueueSize,
 		ContextLimit:  defaultContextLimit,
 		ToolCallLimit: defaultToolCallLimit,
+		ShowReasoning: defaultShowReasoning,
 	}
 
 	data, err := os.ReadFile(path)
@@ -143,6 +146,13 @@ func applyEnvironment(cfg *Config) error {
 			return fmt.Errorf("parse SPARK_TOOL_CALL_LIMIT: %w", err)
 		}
 		cfg.ToolCallLimit = limit
+	}
+	if value, ok := os.LookupEnv("SPARK_SHOW_REASONING"); ok {
+		show, err := strconv.ParseBool(value)
+		if err != nil {
+			return fmt.Errorf("parse SPARK_SHOW_REASONING: %w", err)
+		}
+		cfg.ShowReasoning = show
 	}
 
 	return nil

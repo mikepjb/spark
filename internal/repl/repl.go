@@ -22,6 +22,7 @@ const (
 	EventQueued        EventKind = "queued"
 	EventStarted       EventKind = "started"
 	EventChunk         EventKind = "chunk"
+	EventReasoning     EventKind = "reasoning"
 	EventCompleted     EventKind = "completed"
 	EventFailed        EventKind = "failed"
 	EventCancelled     EventKind = "cancelled"
@@ -36,6 +37,7 @@ type Event struct {
 	Kind         EventKind
 	RequestID    uint64
 	Content      string
+	Reasoning    string
 	ToolCallID   string
 	Failed       bool
 	QueueCount   int
@@ -53,6 +55,7 @@ type Config struct {
 	QueueLimit     int
 	ContextLimit   int
 	ToolCallLimit  int
+	ShowReasoning  bool
 	RequestTimeout time.Duration
 	Tools          *tools.Registry
 }
@@ -91,7 +94,7 @@ type Coordinator struct {
 	mu           sync.Mutex
 	queue        []request
 	transcript   []llm.Message
-	apiHistory   []llm.Request
+	apiHistory   []llm.Exchange
 	activeCancel context.CancelFunc
 	closed       bool
 
@@ -308,9 +311,10 @@ func (c *Coordinator) process(req request, ctx context.Context) {
 			Tools:         toolDefinitions(c.config.Tools),
 			StreamOptions: &llm.StreamOptions{IncludeUsage: true},
 		}
-		c.recordAPIRequest(completionRequest)
+		exchangeIndex := c.recordAPIRequest(completionRequest)
 		stream, err := client.Complete(ctx, completionRequest)
 		if err != nil {
+			c.recordAPIResponse(exchangeIndex, llm.Response{Error: err.Error()})
 			if errors.Is(ctx.Err(), context.Canceled) {
 				c.emit(Event{Kind: EventCancelled, RequestID: req.id})
 				return
@@ -321,16 +325,17 @@ func (c *Coordinator) process(req request, ctx context.Context) {
 
 		response, calls, streamErr := c.readStream(ctx, req.id, stream)
 		_ = stream.Close()
+		c.recordAPIResponse(exchangeIndex, response)
 		if streamErr != nil {
 			if errors.Is(ctx.Err(), context.Canceled) {
-				c.emit(Event{Kind: EventCancelled, RequestID: req.id, Content: response})
+				c.emit(Event{Kind: EventCancelled, RequestID: req.id, Content: response.Content})
 				return
 			}
 			c.fail(req.id, streamErr, true)
 			return
 		}
 		if len(calls) == 0 {
-			c.complete(req, response, intermediate)
+			c.complete(req, response.Content, intermediate)
 			return
 		}
 		accepted := calls
@@ -339,7 +344,7 @@ func (c *Coordinator) process(req request, ctx context.Context) {
 			accepted = accepted[:remaining]
 		}
 
-		assistant := llm.Message{Role: "assistant", Content: contentOrNil(response), ToolCalls: assistantToolCalls(accepted)}
+		assistant := llm.Message{Role: "assistant", Content: contentOrNil(response.Content), ToolCalls: assistantToolCalls(accepted)}
 		messages = append(messages, assistant)
 		intermediate = append(intermediate, assistant)
 		for _, call := range accepted {
@@ -382,40 +387,63 @@ func (c *Coordinator) finalizeWithoutTools(ctx context.Context, requestID uint64
 		Stream:        true,
 		StreamOptions: &llm.StreamOptions{IncludeUsage: true},
 	}
-	c.recordAPIRequest(request)
+	exchangeIndex := c.recordAPIRequest(request)
 	stream, err := client.Complete(ctx, request)
 	if err != nil {
+		c.recordAPIResponse(exchangeIndex, llm.Response{Error: err.Error()})
 		return "", fmt.Errorf("finalize after tool-call limit: %w", err)
 	}
 	response, calls, streamErr := c.readStream(ctx, requestID, stream)
 	_ = stream.Close()
+	c.recordAPIResponse(exchangeIndex, response)
 	if streamErr != nil {
-		return response, fmt.Errorf("finalize after tool-call limit: %w", streamErr)
+		return response.Content, fmt.Errorf("finalize after tool-call limit: %w", streamErr)
 	}
 	if len(calls) > 0 {
-		return response, fmt.Errorf("final response requested tools after the tool-call limit")
+		return response.Content, fmt.Errorf("final response requested tools after the tool-call limit")
 	}
-	if strings.TrimSpace(response) == "" {
-		return response, fmt.Errorf("final response after tool-call limit was empty")
+	if strings.TrimSpace(response.Content) == "" {
+		return response.Content, fmt.Errorf("final response after tool-call limit was empty")
 	}
-	return response, nil
+	return response.Content, nil
 }
 
-func (c *Coordinator) APIHistory() []llm.Request {
+func (c *Coordinator) APIHistory() []llm.Exchange {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	history := make([]llm.Request, len(c.apiHistory))
-	for i, request := range c.apiHistory {
-		history[i] = cloneRequest(request)
+	history := make([]llm.Exchange, len(c.apiHistory))
+	for i, exchange := range c.apiHistory {
+		history[i] = cloneExchange(exchange)
 	}
 	return history
 }
 
-func (c *Coordinator) recordAPIRequest(request llm.Request) {
+func (c *Coordinator) recordAPIRequest(request llm.Request) int {
 	c.mu.Lock()
-	c.apiHistory = append(c.apiHistory, cloneRequest(request))
+	index := len(c.apiHistory)
+	c.apiHistory = append(c.apiHistory, llm.Exchange{Request: cloneRequest(request)})
 	c.mu.Unlock()
+	return index
+}
+
+func (c *Coordinator) recordAPIResponse(index int, response llm.Response) {
+	c.mu.Lock()
+	if index >= 0 && index < len(c.apiHistory) {
+		c.apiHistory[index].Response = cloneResponse(response)
+	}
+	c.mu.Unlock()
+}
+
+func cloneExchange(exchange llm.Exchange) llm.Exchange {
+	return llm.Exchange{Request: cloneRequest(exchange.Request), Response: cloneResponse(exchange.Response)}
+}
+
+func cloneResponse(response llm.Response) llm.Response {
+	clone := response
+	clone.RawChunks = append([]string(nil), response.RawChunks...)
+	clone.ToolCalls = append([]llm.ToolCallTrace(nil), response.ToolCalls...)
+	return clone
 }
 
 func cloneRequest(request llm.Request) llm.Request {
@@ -512,26 +540,52 @@ func withToolBudget(messages []llm.Message, remaining int) []llm.Message {
 	return append([]llm.Message{{Role: "system", Content: llm.StringContent(strings.TrimSpace(budget))}}, result...)
 }
 
-func (c *Coordinator) readStream(ctx context.Context, requestID uint64, stream llm.Stream) (string, []llm.ToolCall, error) {
-	var response strings.Builder
+func (c *Coordinator) readStream(ctx context.Context, requestID uint64, stream llm.Stream) (llm.Response, []llm.ToolCall, error) {
+	var response llm.Response
 	fragments := make(map[int]*llm.ToolCallDelta)
 	for {
 		delta, err := stream.Next()
+		if delta.Raw != "" {
+			response.RawChunks = append(response.RawChunks, delta.Raw)
+		}
+		if delta.Model != "" {
+			response.Model = delta.Model
+		}
+		if delta.Finish != "" {
+			response.Finish = delta.Finish
+		}
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				if ctx.Err() != nil {
-					return response.String(), nil, ctx.Err()
+					response.Error = ctx.Err().Error()
+					return response, nil, ctx.Err()
 				}
-				return response.String(), assembleToolCalls(fragments), nil
+				calls := assembleToolCalls(fragments)
+				response.ToolCalls = make([]llm.ToolCallTrace, len(calls))
+				for i, call := range calls {
+					response.ToolCalls[i] = llm.ToolCallTrace{
+						ID:           call.ID,
+						Name:         call.Name,
+						ArgumentsRaw: string(call.Arguments),
+					}
+				}
+				return response, calls, nil
 			}
-			return response.String(), nil, err
+			response.Error = err.Error()
+			return response, nil, err
 		}
 		if delta.Usage != nil {
 			c.emit(Event{Kind: EventContext, RequestID: requestID, ContextUsed: delta.Usage.TotalTokens, ContextLimit: c.config.ContextLimit})
 		}
 		if delta.Content != "" {
-			response.WriteString(delta.Content)
+			response.Content += delta.Content
 			c.emit(Event{Kind: EventChunk, RequestID: requestID, Content: delta.Content})
+		}
+		if delta.ReasoningContent != "" {
+			response.ReasoningContent += delta.ReasoningContent
+			if c.config.ShowReasoning {
+				c.emit(Event{Kind: EventReasoning, RequestID: requestID, Reasoning: delta.ReasoningContent})
+			}
 		}
 		for _, fragment := range delta.ToolCall {
 			call := fragments[fragment.Index]
@@ -548,7 +602,8 @@ func (c *Coordinator) readStream(ctx context.Context, requestID uint64, stream l
 			call.Arguments += fragment.Arguments
 		}
 		if err := ctx.Err(); err != nil {
-			return response.String(), nil, err
+			response.Error = err.Error()
+			return response, nil, err
 		}
 	}
 }

@@ -81,6 +81,7 @@ func main() {
 		QueueLimit:    cfg.QueueLimit,
 		ContextLimit:  cfg.ContextLimit,
 		ToolCallLimit: cfg.ToolCallLimit,
+		ShowReasoning: cfg.ShowReasoning,
 		Tools:         registry,
 	})
 	modelOptions := make([]commands.ModelOption, 0, len(modelManager.Choices()))

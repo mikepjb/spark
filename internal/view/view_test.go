@@ -409,12 +409,13 @@ func TestMarkdownRendererDoesNotPrefixBlankLine(t *testing.T) {
 func TestSaveHistoryWritesChatAndAPIHistory(t *testing.T) {
 	backend := &fakeBackend{
 		events: make(chan repl.Event),
-		apiHistory: []llm.Request{{
-			Model: "test-model",
-			Messages: []llm.Message{{
-				Role:    "user",
-				Content: llm.StringContent("inspect README.md"),
-			}},
+		apiHistory: []llm.Exchange{{
+			Request: llm.Request{Model: "test-model",
+				Messages: []llm.Message{{
+					Role:    "user",
+					Content: llm.StringContent("inspect README.md"),
+				}},
+			},
 		}},
 	}
 	m := newModel(backend, "test-model")
@@ -435,8 +436,8 @@ func TestSaveHistoryWritesChatAndAPIHistory(t *testing.T) {
 	for _, expected := range []string{
 		"# Spark message history",
 		"## Tool\n\nRead notes.txt",
-		"## API requests",
-		"### Request 1",
+		"## API exchanges",
+		"### Exchange 1",
 		`"model": "test-model"`,
 		`"inspect README.md"`,
 	} {
@@ -592,7 +593,7 @@ func TestToolHistoryPreservesRoundOrderAndFailure(t *testing.T) {
 
 type fakeBackend struct {
 	events     chan repl.Event
-	apiHistory []llm.Request
+	apiHistory []llm.Exchange
 	submitID   uint64
 	submitErr  error
 	cancelled  int
@@ -605,7 +606,7 @@ func (b *fakeBackend) Submit(string) (uint64, error) {
 
 func (b *fakeBackend) Events() <-chan repl.Event { return b.events }
 
-func (b *fakeBackend) APIHistory() []llm.Request { return b.apiHistory }
+func (b *fakeBackend) APIHistory() []llm.Exchange { return b.apiHistory }
 
 func (b *fakeBackend) Cancel() { b.cancelled++ }
 

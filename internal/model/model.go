@@ -1,10 +1,12 @@
 package model
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/mikepjb/spark/internal/config"
 	"github.com/mikepjb/spark/internal/llm"
@@ -35,6 +37,7 @@ func New(cfg config.Config) (*Manager, error) {
 		}
 		manager.choices[name] = Choice{Name: name, Provider: "default", Model: cfg.Model, Client: client}
 		manager.active = name
+		manager.discoverActiveModel()
 		return manager, nil
 	}
 
@@ -62,7 +65,28 @@ func New(cfg config.Config) (*Manager, error) {
 			return nil, fmt.Errorf("configured active model %q does not exist", manager.active)
 		}
 	}
+	manager.discoverActiveModel()
 	return manager, nil
+}
+
+func (m *Manager) discoverActiveModel() {
+	m.discoverModel(m.active)
+}
+
+func (m *Manager) discoverModel(name string) {
+	choice := m.choices[name]
+	discoverer, ok := choice.Client.(interface {
+		DiscoverModel(context.Context) (string, error)
+	})
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if discovered, err := discoverer.DiscoverModel(ctx); err == nil && discovered != "" {
+		choice.Model = discovered
+		m.choices[name] = choice
+	}
 }
 
 func (m *Manager) Choices() []Choice {
@@ -82,6 +106,8 @@ func (m *Manager) Select(name string) (Choice, error) {
 		return Choice{}, fmt.Errorf("model %q is not configured", name)
 	}
 	m.active = name
+	m.discoverModel(name)
+	choice = m.choices[name]
 	return choice, nil
 }
 

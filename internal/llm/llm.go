@@ -24,6 +24,27 @@ type Request struct {
 	StreamOptions *StreamOptions   `json:"stream_options,omitempty"`
 }
 
+type Exchange struct {
+	Request  Request  `json:"request"`
+	Response Response `json:"response"`
+}
+
+type Response struct {
+	Model            string          `json:"model,omitempty"`
+	Content          string          `json:"content,omitempty"`
+	ReasoningContent string          `json:"reasoning_content,omitempty"`
+	ToolCalls        []ToolCallTrace `json:"tool_calls,omitempty"`
+	RawChunks        []string        `json:"raw_chunks,omitempty"`
+	Finish           string          `json:"finish_reason,omitempty"`
+	Error            string          `json:"error,omitempty"`
+}
+
+type ToolCallTrace struct {
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	ArgumentsRaw string `json:"arguments_raw"`
+}
+
 type ToolDefinition struct {
 	Type     string             `json:"type"`
 	Function FunctionDefinition `json:"function"`
@@ -40,16 +61,20 @@ type StreamOptions struct {
 }
 
 type Delta struct {
-	Content  string
-	ToolCall []ToolCallDelta
-	Usage    *Usage
-	Done     bool
+	Content          string
+	ReasoningContent string
+	ToolCall         []ToolCallDelta
+	Usage            *Usage
+	Done             bool
+	Model            string
+	Finish           string
+	Raw              string
 }
 
 type ToolCall struct {
-	ID        string
-	Name      string
-	Arguments json.RawMessage
+	ID        string          `json:"id"`
+	Name      string          `json:"name"`
+	Arguments json.RawMessage `json:"arguments"`
 }
 
 type AssistantToolCall struct {

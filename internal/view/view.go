@@ -23,7 +23,7 @@ import (
 type Backend interface {
 	Submit(string) (uint64, error)
 	Events() <-chan repl.Event
-	APIHistory() []llm.Request
+	APIHistory() []llm.Exchange
 	Cancel()
 	Close()
 }
@@ -89,6 +89,8 @@ type chatMessage struct {
 	toolID               string
 	toolName             string
 	content              string
+	reasoningContent     string
+	reasoningExpanded    bool
 	status               messageStatus
 	startedAt            time.Time
 	renderedContent      string
@@ -116,6 +118,7 @@ type keyMap struct {
 	ScrollUp         key.Binding
 	ScrollDown       key.Binding
 	SaveHistory      key.Binding
+	Reasoning        key.Binding
 	Paste            key.Binding
 }
 
@@ -169,6 +172,10 @@ func newKeyMap() keyMap {
 			key.WithKeys("ctrl+x"),
 			key.WithHelp("ctrl+x", "save history"),
 		),
+		Reasoning: key.NewBinding(
+			key.WithKeys("ctrl+r"),
+			key.WithHelp("ctrl+r", "toggle reasoning"),
+		),
 		Paste: key.NewBinding(
 			key.WithKeys("ctrl+v"),
 			key.WithHelp("ctrl+v", "paste from clipboard"),
@@ -183,7 +190,7 @@ func (k keyMap) ShortHelp() []key.Binding {
 func (k keyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Submit, k.InsertNewline, k.Help, k.Settings},
-		{k.ScrollUp, k.ScrollDown, k.SaveHistory, k.Close, k.Quit, k.Paste},
+		{k.ScrollUp, k.ScrollDown, k.SaveHistory, k.Reasoning, k.Close, k.Quit, k.Paste},
 	}
 }
 
@@ -195,25 +202,26 @@ type model struct {
 	help     help.Model
 	keys     keyMap
 
-	busy            bool
-	queued          int
-	cancelConfirm   bool
-	showHelp        bool
-	showSettings    bool
-	notice          string
-	activeID        uint64
-	modelName       string
-	contextUsed     int
-	contextLimit    int
-	windowWidth     int
-	windowHeight    int
-	currentDir      string
-	markdown        markdownRenderer
-	backend         Backend
-	commands        *commands.Engine
-	completion      commands.Completion
-	completionIdx   int
-	historyFilePath string
+	busy              bool
+	reasoningExpanded bool
+	queued            int
+	cancelConfirm     bool
+	showHelp          bool
+	showSettings      bool
+	notice            string
+	activeID          uint64
+	modelName         string
+	contextUsed       int
+	contextLimit      int
+	windowWidth       int
+	windowHeight      int
+	currentDir        string
+	markdown          markdownRenderer
+	backend           Backend
+	commands          *commands.Engine
+	completion        commands.Completion
+	completionIdx     int
+	historyFilePath   string
 }
 
 func inputStyles() textarea.Styles {
@@ -421,10 +429,11 @@ func (m *model) handleReplEvent(event repl.Event) tea.Cmd {
 		}
 		m.activeID = event.RequestID
 		m.history = append(m.history, chatMessage{
-			id:        event.RequestID,
-			role:      roleAssistant,
-			status:    statusActive,
-			startedAt: time.Now(),
+			id:                event.RequestID,
+			role:              roleAssistant,
+			status:            statusActive,
+			startedAt:         time.Now(),
+			reasoningExpanded: m.reasoningExpanded,
 		})
 		m.refreshHistory(true)
 		var cmd tea.Cmd
@@ -436,6 +445,12 @@ func (m *model) handleReplEvent(event repl.Event) tea.Cmd {
 			// accumulated source so later chunks can close it correctly.
 			message.content += event.Content
 			message.renderedContentValid = false
+			m.refreshHistory(true)
+		}
+	case repl.EventReasoning:
+		if message := m.assistantMessageForChunk(event.RequestID); message != nil {
+			message.reasoningContent += event.Reasoning
+			message.reasoningExpanded = m.reasoningExpanded
 			m.refreshHistory(true)
 		}
 	case repl.EventCompleted:
@@ -624,7 +639,7 @@ func renderHistoryMessage(message *chatMessage, width int, markdown *markdownRen
 }
 
 func renderHistoryMessageWithIndent(message *chatMessage, width int, markdown *markdownRenderer, indent, spinnerFrame string) string {
-	if message.role == roleAssistant && strings.TrimSpace(message.content) == "" && message.status != statusActive {
+	if message.role == roleAssistant && strings.TrimSpace(message.content) == "" && message.reasoningContent == "" && message.status != statusActive {
 		return ""
 	}
 
@@ -639,7 +654,9 @@ func renderHistoryMessageWithIndent(message *chatMessage, width int, markdown *m
 	contentWidth := atLeastOne(width - lipgloss.Width(indent) - lipgloss.Width(historyContentIndent))
 	var lines []string
 	if message.role == roleAssistant && strings.TrimSpace(message.content) == "" {
-		lines = []string{renderWorkingMessage(*message, spinnerFrame)}
+		if message.status == statusActive {
+			lines = []string{renderWorkingMessage(*message, spinnerFrame)}
+		}
 	} else if message.role == roleAssistant {
 		if !message.renderedContentValid || message.renderedContentWidth != contentWidth {
 			formatted, err := markdown.render(message.content, contentWidth)
@@ -665,6 +682,24 @@ func renderHistoryMessageWithIndent(message *chatMessage, width int, markdown *m
 			rendered[i] = prefix + line
 		} else {
 			rendered[i] = prefix + contentStyle.Render(line)
+		}
+	}
+	if message.role == roleAssistant && message.reasoningContent != "" {
+		reasoningStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(workingHintColor))
+		reasoningPrefix := indent + historyContentIndent
+		if len(rendered) > 0 {
+			rendered = append(rendered, "")
+		}
+		header := "• Reasoning (ctrl + r to expand)"
+		if message.reasoningExpanded {
+			header = "• Reasoning (ctrl + r to contract)"
+		}
+		rendered = append(rendered, reasoningPrefix+reasoningStyle.Render(header))
+		if message.reasoningExpanded {
+			reasoningWidth := atLeastOne(contentWidth - lipgloss.Width("  "))
+			for _, line := range strings.Split(lipgloss.Wrap(message.reasoningContent, reasoningWidth, ""), "\n") {
+				rendered = append(rendered, reasoningPrefix+"  "+reasoningStyle.Render(line))
+			}
 		}
 	}
 

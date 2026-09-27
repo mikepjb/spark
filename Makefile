@@ -29,6 +29,7 @@ config:
 		'queue_limit: 5' \
 		'context_limit: 64000' \
 		'tool_call_limit: 8' \
+		'show_reasoning: true' \
 		> "$$config_file" \
 	) || { \
 		echo "Could not create Spark config: $$config_file" >&2; \

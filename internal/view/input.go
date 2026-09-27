@@ -13,6 +13,17 @@ import (
 // handleKeyPress handles key presses in the 'default' UI state of spark i.e
 // when no modals are showing etc.
 func (m model) handleKeyPress(msg tea.KeyPressMsg) (model, tea.Cmd, bool) {
+	if key.Matches(msg, m.keys.Reasoning) {
+		m.reasoningExpanded = !m.reasoningExpanded
+		for i := range m.history {
+			if m.history[i].role == roleAssistant && m.history[i].reasoningContent != "" {
+				m.history[i].reasoningExpanded = m.reasoningExpanded
+			}
+		}
+		m.refreshHistory(false)
+		return m, nil, true
+	}
+
 	if len(m.completion.Items) > 0 {
 		if key.Matches(msg, m.keys.Escape) {
 			m.completion = commands.Completion{}
