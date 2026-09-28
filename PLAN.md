@@ -341,7 +341,7 @@ Delegation prompt:
 
 - [x] 1. Single-shot CLI
 - [x] 2. Revision-range Git diff
-- [ ] 3. Evaluation runner and result format
+- [x] 3. Evaluation runner and result format
 - [ ] 4. Core evaluation suite
 - [ ] 5. Baseline model comparison
 - [ ] 6. Retrieval utilisation experiment

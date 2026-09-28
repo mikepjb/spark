@@ -1,0 +1,12 @@
+version: 1
+models:
+  qwen35-4b:
+    gguf: /absolute/path/to/model.gguf
+    quantization: Q4_K_M
+    llama_cpp_version: "record server build or commit"
+    chat_template: "record exact template or hash"
+    context_size: 64000
+    reasoning_mode: disabled
+    sampling:
+      temperature: 0.0
+    hardware_notes: "record CPU/GPU, offload, threads, and memory"

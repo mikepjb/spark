@@ -52,6 +52,7 @@ type RunResult struct {
 	Model     string        `json:"resolved_model,omitempty"`
 	Answer    string        `json:"answer,omitempty"`
 	Duration  time.Duration `json:"duration_ns"`
+	Rounds    int           `json:"rounds"`
 	Usage     llm.Usage     `json:"usage"`
 	ToolCalls []RunToolCall `json:"tool_calls"`
 	Status    string        `json:"status"`
@@ -342,6 +343,7 @@ func (c *Coordinator) process(req request, ctx context.Context) {
 	var intermediate []llm.Message
 	callsUsed := 0
 	for {
+		run.Rounds++
 		remaining := c.config.ToolCallLimit - callsUsed
 		requestMessages := messages
 		if c.config.Tools != nil {
@@ -410,6 +412,7 @@ func (c *Coordinator) process(req request, ctx context.Context) {
 		}
 		callsUsed += len(accepted)
 		if truncated || callsUsed >= c.config.ToolCallLimit {
+			run.Rounds++
 			finalResponse, finalModel, usage, err := c.finalizeWithoutTools(ctx, req.id, client, model, messages)
 			addUsage(&run.Usage, &usage)
 			if finalModel != "" {

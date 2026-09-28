@@ -160,7 +160,7 @@ func TestRunHeadlessJSONEmitsVersionedResultAndToolTrace(t *testing.T) {
 	if err := json.Unmarshal([]byte(stdout.String()), &result); err != nil {
 		t.Fatalf("decode result: %v; output=%q", err, stdout.String())
 	}
-	if result.SchemaVersion != 1 || result.SelectedProfile != "qwen-profile" || result.ResolvedModel != "resolved-qwen" || result.Answer != "done" || result.Status != "succeeded" || result.Usage.TotalTokens != 17 || len(result.ToolCalls) != 1 || result.ToolCalls[0].Name != "Read" {
+	if result.SchemaVersion != 1 || result.SelectedProfile != "qwen-profile" || result.ResolvedModel != "resolved-qwen" || result.Answer != "done" || result.Status != "succeeded" || result.Usage.TotalTokens != 17 || result.Rounds != 2 || len(result.ToolCalls) != 1 || result.ToolCalls[0].Name != "Read" {
 		t.Fatalf("result = %+v", result)
 	}
 	if strings.Contains(stdout.String(), "tool:") || !strings.Contains(stderr.String(), "tool: Read") {

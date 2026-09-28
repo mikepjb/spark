@@ -61,6 +61,7 @@ type resultDocument struct {
 	ResolvedModel   string             `json:"resolved_model"`
 	Answer          string             `json:"answer"`
 	DurationMS      int64              `json:"duration_ms"`
+	Rounds          int                `json:"rounds"`
 	Usage           llm.Usage          `json:"usage"`
 	ToolCalls       []repl.RunToolCall `json:"tool_calls"`
 	Status          string             `json:"status"`
@@ -386,6 +387,7 @@ func writeJSONResult(writer io.Writer, app *application, run *repl.RunResult) er
 	return json.NewEncoder(writer).Encode(resultDocument{
 		SchemaVersion: 1, SelectedProfile: app.profileName, ResolvedModel: run.Model,
 		Answer: run.Answer, DurationMS: run.Duration.Milliseconds(), Usage: run.Usage,
+		Rounds:    run.Rounds,
 		ToolCalls: toolCalls, Status: run.Status, Error: run.Error,
 	})
 }

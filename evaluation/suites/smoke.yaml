@@ -1,0 +1,5 @@
+version: 1
+id: smoke
+cases:
+  - id: direct-answer
+    prompt: "What is 2 + 2? Answer with the number only."

@@ -165,7 +165,10 @@ func TestCoordinatorAddsRuntimeEnvironmentToSystemPrompt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	waitForEvent(t, coordinator.Events(), EventCompleted, id)
+	completed := waitForEvent(t, coordinator.Events(), EventCompleted, id)
+	if completed.Run == nil || completed.Run.Rounds != 1 {
+		t.Fatalf("model rounds = %+v, want 1", completed.Run)
+	}
 
 	request := client.request(0)
 	if len(request.Messages) != 2 || request.Messages[0].Role != "system" || request.Messages[0].Content == nil {
@@ -428,7 +431,10 @@ func TestCoordinatorFinalizesAfterToolCallLimit(t *testing.T) {
 	waitForEvent(t, coordinator.Events(), EventToolStarted, id)
 	waitForEvent(t, coordinator.Events(), EventToolCompleted, id)
 	waitForEvent(t, coordinator.Events(), EventChunk, id)
-	waitForEvent(t, coordinator.Events(), EventCompleted, id)
+	completed := waitForEvent(t, coordinator.Events(), EventCompleted, id)
+	if completed.Run == nil || completed.Run.Rounds != 2 {
+		t.Fatalf("model rounds = %+v, want 2", completed.Run)
+	}
 
 	select {
 	case event := <-coordinator.Events():

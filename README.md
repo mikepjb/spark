@@ -19,7 +19,7 @@ running comfortably on a consumer laptop.
   result on stdout. Tool progress and errors go to stderr in both formats.
 - Example: `spark --format json -s review -p "focus on concurrency problems"`.
 - JSON results use schema version `1` with `selected_profile`, `resolved_model`,
-  `answer`, `duration_ms`, token `usage`, `tool_calls`, `status`, and `error`.
+  `answer`, `duration_ms`, token `usage`, `rounds`, `tool_calls`, `status`, and `error`.
   Status is `succeeded`, `failed`, or `cancelled`; usage and tool-call details
   cover the full request, including tool rounds. Configuration/startup failures
   exit `1`, invalid arguments or profile/skill selections exit `2`, and SIGINT
@@ -32,6 +32,38 @@ running comfortably on a consumer laptop.
   MiniCPM5 is not likely to have it - instead cloning the library repo and
   asking spark inside the repo seems to generate great results (using HTMX
   events as an example).
+
+## Development evaluations
+
+Build Spark, then run the development-only evaluator against a configured model
+profile and an already running endpoint:
+
+```sh
+go build -o /tmp/spark ./cmd/spark
+go run ./cmd/spark-eval --suite evaluation/suites/smoke.yaml \
+  --model qwen35-4b --runs 3 --spark /tmp/spark \
+  --manifest evaluation/manifest.yaml
+```
+
+Copy `evaluation/manifest.example.yaml` to `evaluation/manifest.yaml` and fill
+in the model, inference, and hardware details. The manifest is optional for
+tests, but needed for reproducible comparisons. Each suite case runs through
+Spark's JSON CLI; the runner does not manage model servers. Cases can specify
+`prompt`, `skill`, and a `workspace` relative to the suite file.
+
+Results append to the Git-ignored `evaluation/results/runs.jsonl` by default.
+They include the answer, outcome, timing, tokens, model rounds, tool calls, and
+manifest metadata. Failed and interrupted cases are recorded. Re-running the
+same command skips recorded runs; use a larger `--runs` value or a new output
+file for fresh attempts. Run once per model profile.
+
+For repeated runs, use `make eval-qwen35-4b` (or `make eval EVAL_MODEL=your-profile`).
+Targets also exist for Qwen 3.5 0.8B/2B/9B, MiniCPM5 2B, Gemma 4 E2B/E4B,
+and Granite 4.1 3B. Each target requires a matching profile in `~/.sparkrc`
+and matching metadata in `evaluation/manifest.yaml`; start that profile's
+endpoint first. Override `EVAL_SUITE`, `EVAL_RUNS`, or `EVAL_OUTPUT` as needed.
+The included `smoke.yaml` only checks that evaluation runs; use a substantive
+suite to compare model quality.
 
 ## Model Targets
 
