@@ -1,0 +1,53 @@
+version: 1
+id: practical
+cases:
+  - id: project-overview
+    workspace: ../..
+    prompt: >-
+      Read README.md and give me a five-bullet overview of Spark: its purpose,
+      how people use it, its read-only boundary, configuration, and evaluation
+      workflow. Point to the relevant README sections. Separate implemented
+      behavior from planned features.
+
+  - id: configuration-flow
+    workspace: ../..
+    prompt: >-
+      In this repository, trace how a model profile in ~/.sparkrc reaches the
+      headless request made by spark -m PROFILE -p "question". Name the main
+      functions and files, and explain how the selected endpoint and resolved
+      model reach the coordinator. Keep the answer concise.
+
+  - id: go-stdlib-json
+    workspace: ../..
+    prompt: >-
+      Using Go's encoding/json package (v1), how do I decode one JSON object
+      from an io.Reader into a struct while rejecting unknown object fields?
+      Show a short snippet and say what happens to unknown fields by default.
+
+  - id: python-stdlib-pathlib
+    workspace: ../..
+    prompt: >-
+      In Python 3.12, how do I read a UTF-8 text file into a str with pathlib?
+      Show one line and say whether the convenience method leaves the file open.
+
+  - id: go-third-party-yaml
+    workspace: ../..
+    prompt: >-
+      With gopkg.in/yaml.v3 v3.0.1, how do I decode YAML from an io.Reader into
+      a struct while rejecting unrecognized mapping keys? Show the relevant
+      calls and explain why plain yaml.Unmarshal is not enough for this check.
+
+  - id: python-third-party-requests
+    workspace: ../..
+    prompt: >-
+      With Python Requests 2.x, show a GET with separate connect and read
+      timeouts and a check that raises for HTTP 4xx/5xx responses. Does the read
+      timeout cap the entire download? Keep the example short.
+
+  - id: code-review-cache
+    workspace: ../fixtures/cache-review
+    prompt: >-
+      Review cache.go for correctness and concurrency defects. For each
+      concrete issue, name the function, describe a triggering scenario and
+      consequence, and suggest a focused fix. Prioritize defects that return
+      stale or corrupted data or break concurrent use. Do not modify files.

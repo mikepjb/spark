@@ -121,3 +121,43 @@ func TestInvalidSuiteAndCorruptResumeFile(t *testing.T) {
 		t.Fatal("accepted corrupt result file")
 	}
 }
+
+func TestPracticalSuiteIsRunnable(t *testing.T) {
+	path := filepath.Join("..", "..", "evaluation", "suites", "practical.yaml")
+	var s suite
+	if _, err := readYAML(path, &s); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateSuite(s); err != nil {
+		t.Fatal(err)
+	}
+	if len(s.Cases) != 7 {
+		t.Fatalf("practical suite has %d cases, want 7", len(s.Cases))
+	}
+	for _, c := range s.Cases {
+		if c.Workspace == "" {
+			t.Fatalf("case %q has no workspace", c.ID)
+		}
+		workspace := filepath.Join(filepath.Dir(path), c.Workspace)
+		info, err := os.Stat(workspace)
+		if err != nil || !info.IsDir() {
+			t.Fatalf("case %q workspace %q is unavailable: %v", c.ID, workspace, err)
+		}
+	}
+	dir := t.TempDir()
+	spark := filepath.Join(dir, "spark")
+	output := filepath.Join(dir, "runs.jsonl")
+	writeFixture(t, spark, "#!/bin/sh\necho '{\"schema_version\":1,\"selected_profile\":\"test\",\"resolved_model\":\"fake\",\"answer\":\"fixture\",\"duration_ms\":1,\"usage\":{},\"rounds\":1,\"tool_calls\":[],\"status\":\"succeeded\",\"error\":\"\"}'\n", 0755)
+	if err := run(context.Background(), []string{"--suite", path, "--model", "test", "--spark", spark, "--output", output}, &strings.Builder{}); err != nil {
+		t.Fatal(err)
+	}
+	results := readRecords(t, output)
+	if len(results) != len(s.Cases) {
+		t.Fatalf("got %d practical results, want %d", len(results), len(s.Cases))
+	}
+	for index, item := range results {
+		if item.CaseID != s.Cases[index].ID || item.Outcome != "succeeded" {
+			t.Fatalf("case %d result: %+v", index, item)
+		}
+	}
+}

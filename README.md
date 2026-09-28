@@ -40,14 +40,14 @@ profile and an already running endpoint:
 
 ```sh
 go build -o /tmp/spark ./cmd/spark
-go run ./cmd/spark-eval --suite evaluation/suites/smoke.yaml \
-  --model qwen35-4b --runs 3 --spark /tmp/spark \
-  --manifest evaluation/manifest.yaml
+go run ./cmd/spark-eval --suite evaluation/suites/practical.yaml \
+  --model qwen35-4b --runs 3 --spark /tmp/spark
 ```
 
-Copy `evaluation/manifest.example.yaml` to `evaluation/manifest.yaml` and fill
-in the model, inference, and hardware details. The manifest is optional for
-tests, but needed for reproducible comparisons. Each suite case runs through
+For reproducible comparisons, copy `evaluation/manifest.example.yaml` to
+`evaluation/manifest.yaml` and fill in the model, inference, and hardware
+details. The Make targets use this manifest when it exists; without it, those
+metadata fields are empty. Each suite case runs through
 Spark's JSON CLI; the runner does not manage model servers. Cases can specify
 `prompt`, `skill`, and a `workspace` relative to the suite file.
 
@@ -59,11 +59,13 @@ file for fresh attempts. Run once per model profile.
 
 For repeated runs, use `make eval-qwen35-4b` (or `make eval EVAL_MODEL=your-profile`).
 Targets also exist for Qwen 3.5 0.8B/2B/9B, MiniCPM5 2B, Gemma 4 E2B/E4B,
-and Granite 4.1 3B. Each target requires a matching profile in `~/.sparkrc`
-and matching metadata in `evaluation/manifest.yaml`; start that profile's
-endpoint first. Override `EVAL_SUITE`, `EVAL_RUNS`, or `EVAL_OUTPUT` as needed.
-The included `smoke.yaml` only checks that evaluation runs; use a substantive
-suite to compare model quality.
+and Granite 4.1 3B. Each target requires a matching profile in `~/.sparkrc`;
+start that profile's endpoint first. Override `EVAL_SUITE`, `EVAL_RUNS`, or
+`EVAL_OUTPUT` as needed.
+The default `practical.yaml` suite covers project comprehension, Go and Python
+library usage, and a seeded code review. Its manual answer guide is in
+`evaluation/suites/practical-notes.md`; automatic scoring is not available yet.
+Use `EVAL_SUITE=evaluation/suites/smoke.yaml` for a quick plumbing check.
 
 ## Model Targets
 
