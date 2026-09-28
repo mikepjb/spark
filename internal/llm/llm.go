@@ -33,6 +33,7 @@ type Response struct {
 	Model            string          `json:"model,omitempty"`
 	Content          string          `json:"content,omitempty"`
 	ReasoningContent string          `json:"reasoning_content,omitempty"`
+	Usage            *Usage          `json:"usage,omitempty"`
 	ToolCalls        []ToolCallTrace `json:"tool_calls,omitempty"`
 	RawChunks        []string        `json:"raw_chunks,omitempty"`
 	Finish           string          `json:"finish_reason,omitempty"`

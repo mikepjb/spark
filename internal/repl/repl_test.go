@@ -300,6 +300,32 @@ func TestCoordinatorBoundsAndClearsQueueOnCancellation(t *testing.T) {
 	}
 }
 
+func TestCoordinatorCanCancelQueuedRequestIndividually(t *testing.T) {
+	client := newFakeClient()
+	coordinator := New(client, Config{Model: "test-model", QueueLimit: 5})
+	defer coordinator.Close()
+
+	client.streams <- &blockingStream{started: make(chan struct{})}
+	activeID, err := coordinator.Submit("active")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitForEvent(t, coordinator.Events(), EventStarted, activeID)
+
+	queuedID, err := coordinator.Submit("queued")
+	if err != nil {
+		t.Fatal(err)
+	}
+	coordinator.CancelRequest(queuedID)
+	cancelled := waitForEvent(t, coordinator.Events(), EventCancelled, queuedID)
+	if cancelled.Run == nil || cancelled.Run.Status != "cancelled" || cancelled.Run.Model != "test-model" {
+		t.Fatalf("queued cancellation result = %+v", cancelled)
+	}
+
+	coordinator.Cancel()
+	waitForEvent(t, coordinator.Events(), EventCancelled, activeID)
+}
+
 func TestCoordinatorExecutesToolCallsAndContinuesConversation(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "notes.txt"), []byte("tool result\n"), 0o600); err != nil {

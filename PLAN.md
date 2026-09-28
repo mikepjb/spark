@@ -334,7 +334,7 @@ Delegation prompt:
 
 ## Completion order
 
-- [ ] 1. Single-shot CLI
+- [x] 1. Single-shot CLI
 - [ ] 2. Revision-range Git diff
 - [ ] 3. Evaluation runner and result format
 - [ ] 4. Core evaluation suite
@@ -342,4 +342,3 @@ Delegation prompt:
 - [ ] 6. Retrieval utilisation experiment
 - [ ] 7. Local documentation retrieval prototype, if justified
 - [ ] 8. Web search spike, if justified
-

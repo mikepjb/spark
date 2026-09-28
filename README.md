@@ -8,6 +8,22 @@ running comfortably on a consumer laptop.
 ## How to use this harness
 
 - `make install` to compile and install the `spark` binary.
+- `spark` starts the interactive TUI. Use `spark -p "explain the configuration flow"`
+  to send one prompt and exit, or `spark -s review` to activate a discovered
+  skill. Bare `spark -p` opens the executable set in `$EDITOR` (for example,
+  `nvim`) with a temporary prompt file. A skill without `-p` receives the
+  generic prompt “Apply the selected skill to this workspace. Follow its
+  instructions and report the result.”
+- `-m` / `--model` selects a configured model profile for either mode. Headless
+  output defaults to streamed text; `--format json` emits one versioned JSON
+  result on stdout. Tool progress and errors go to stderr in both formats.
+- Example: `spark --format json -s review -p "focus on concurrency problems"`.
+- JSON results use schema version `1` with `selected_profile`, `resolved_model`,
+  `answer`, `duration_ms`, token `usage`, `tool_calls`, `status`, and `error`.
+  Status is `succeeded`, `failed`, or `cancelled`; usage and tool-call details
+  cover the full request, including tool rounds. Configuration/startup failures
+  exit `1`, invalid arguments or profile/skill selections exit `2`, and SIGINT
+  exits `130`.
 - If you want to ask questions about a particular library, 2B is not big so
   MiniCPM5 is not likely to have it - instead cloning the library repo and
   asking spark inside the repo seems to generate great results (using HTMX

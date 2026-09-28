@@ -44,6 +44,26 @@ type Event struct {
 	ContextUsed  int
 	ContextLimit int
 	Err          error
+	Run          *RunResult
+}
+
+// RunResult is the terminal, structured outcome for one submitted request.
+type RunResult struct {
+	Model     string        `json:"resolved_model,omitempty"`
+	Answer    string        `json:"answer,omitempty"`
+	Duration  time.Duration `json:"duration_ns"`
+	Usage     llm.Usage     `json:"usage"`
+	ToolCalls []RunToolCall `json:"tool_calls"`
+	Status    string        `json:"status"`
+	Error     string        `json:"error,omitempty"`
+}
+
+type RunToolCall struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
+	Summary   string `json:"summary"`
+	Failed    bool   `json:"failed"`
 }
 
 type Config struct {
@@ -216,6 +236,27 @@ func (c *Coordinator) Cancel() {
 	}
 }
 
+// CancelRequest cancels one request, including one that has not started yet.
+func (c *Coordinator) CancelRequest(id uint64) {
+	c.mu.Lock()
+	for index, queued := range c.queue {
+		if queued.id != id {
+			continue
+		}
+		c.queue = append(c.queue[:index], c.queue[index+1:]...)
+		model := c.config.Model
+		c.mu.Unlock()
+		c.emit(Event{Kind: EventQueueCleared})
+		c.finishRun(id, &RunResult{Model: model}, time.Now(), "cancelled", "")
+		return
+	}
+	activeCancel := c.activeCancel
+	c.mu.Unlock()
+	if activeCancel != nil {
+		activeCancel()
+	}
+}
+
 func (c *Coordinator) Close() {
 	c.once.Do(func() {
 		c.mu.Lock()
@@ -268,6 +309,8 @@ func (c *Coordinator) next() (request, context.Context, bool) {
 }
 
 func (c *Coordinator) process(req request, ctx context.Context) {
+	startedAt := time.Now()
+	run := RunResult{Model: c.currentModel()}
 	c.mu.Lock()
 	messages := make([]llm.Message, 0, len(c.transcript)+len(req.skillUses)+2)
 	systemPrompt := c.config.SystemPrompt
@@ -316,26 +359,32 @@ func (c *Coordinator) process(req request, ctx context.Context) {
 		if err != nil {
 			c.recordAPIResponse(exchangeIndex, llm.Response{Error: err.Error()})
 			if errors.Is(ctx.Err(), context.Canceled) {
-				c.emit(Event{Kind: EventCancelled, RequestID: req.id})
+				c.finishRun(req.id, &run, startedAt, "cancelled", "")
 				return
 			}
-			c.fail(req.id, err, true)
+			c.failRun(req.id, err, true, &run, startedAt)
 			return
 		}
 
 		response, calls, streamErr := c.readStream(ctx, req.id, stream)
 		_ = stream.Close()
 		c.recordAPIResponse(exchangeIndex, response)
+		if response.Model != "" {
+			run.Model = response.Model
+		}
+		addUsage(&run.Usage, response.Usage)
+		run.Answer += response.Content
 		if streamErr != nil {
 			if errors.Is(ctx.Err(), context.Canceled) {
-				c.emit(Event{Kind: EventCancelled, RequestID: req.id, Content: response.Content})
+				c.finishRun(req.id, &run, startedAt, "cancelled", "")
 				return
 			}
-			c.fail(req.id, streamErr, true)
+			c.failRun(req.id, streamErr, true, &run, startedAt)
 			return
 		}
 		if len(calls) == 0 {
-			c.complete(req, response.Content, intermediate)
+			run.Answer = response.Content
+			c.completeRun(req, response.Content, intermediate, &run, startedAt)
 			return
 		}
 		accepted := calls
@@ -354,28 +403,34 @@ func (c *Coordinator) process(req request, ctx context.Context) {
 				result = c.config.Tools.Execute(ctx, call)
 			}
 			c.emit(Event{Kind: EventToolCompleted, RequestID: req.id, ToolCallID: call.ID, Content: result.Summary, Failed: result.Failed})
+			run.ToolCalls = append(run.ToolCalls, RunToolCall{ID: call.ID, Name: call.Name, Arguments: string(call.Arguments), Summary: result.Summary, Failed: result.Failed})
 			toolMessage := llm.Message{Role: "tool", Content: llm.StringContent(result.Content), ToolCallID: call.ID}
 			messages = append(messages, toolMessage)
 			intermediate = append(intermediate, toolMessage)
 		}
 		callsUsed += len(accepted)
 		if truncated || callsUsed >= c.config.ToolCallLimit {
-			finalResponse, err := c.finalizeWithoutTools(ctx, req.id, client, model, messages)
+			finalResponse, finalModel, usage, err := c.finalizeWithoutTools(ctx, req.id, client, model, messages)
+			addUsage(&run.Usage, &usage)
+			if finalModel != "" {
+				run.Model = finalModel
+			}
+			run.Answer = finalResponse
 			if err != nil {
 				if errors.Is(ctx.Err(), context.Canceled) {
-					c.emit(Event{Kind: EventCancelled, RequestID: req.id, Content: finalResponse})
+					c.finishRun(req.id, &run, startedAt, "cancelled", "")
 					return
 				}
-				c.fail(req.id, err, true)
+				c.failRun(req.id, err, true, &run, startedAt)
 				return
 			}
-			c.complete(req, finalResponse, intermediate)
+			c.completeRun(req, finalResponse, intermediate, &run, startedAt)
 			return
 		}
 	}
 }
 
-func (c *Coordinator) finalizeWithoutTools(ctx context.Context, requestID uint64, client llm.Client, model string, messages []llm.Message) (string, error) {
+func (c *Coordinator) finalizeWithoutTools(ctx context.Context, requestID uint64, client llm.Client, model string, messages []llm.Message) (string, string, llm.Usage, error) {
 	finalMessages := append([]llm.Message(nil), messages...)
 	finalMessages = append(finalMessages, llm.Message{
 		Role:    "user",
@@ -391,21 +446,21 @@ func (c *Coordinator) finalizeWithoutTools(ctx context.Context, requestID uint64
 	stream, err := client.Complete(ctx, request)
 	if err != nil {
 		c.recordAPIResponse(exchangeIndex, llm.Response{Error: err.Error()})
-		return "", fmt.Errorf("finalize after tool-call limit: %w", err)
+		return "", "", llm.Usage{}, fmt.Errorf("finalize after tool-call limit: %w", err)
 	}
 	response, calls, streamErr := c.readStream(ctx, requestID, stream)
 	_ = stream.Close()
 	c.recordAPIResponse(exchangeIndex, response)
 	if streamErr != nil {
-		return response.Content, fmt.Errorf("finalize after tool-call limit: %w", streamErr)
+		return response.Content, response.Model, valueUsage(response.Usage), fmt.Errorf("finalize after tool-call limit: %w", streamErr)
 	}
 	if len(calls) > 0 {
-		return response.Content, fmt.Errorf("final response requested tools after the tool-call limit")
+		return response.Content, response.Model, valueUsage(response.Usage), fmt.Errorf("final response requested tools after the tool-call limit")
 	}
 	if strings.TrimSpace(response.Content) == "" {
-		return response.Content, fmt.Errorf("final response after tool-call limit was empty")
+		return response.Content, response.Model, valueUsage(response.Usage), fmt.Errorf("final response after tool-call limit was empty")
 	}
-	return response.Content, nil
+	return response.Content, response.Model, valueUsage(response.Usage), nil
 }
 
 func (c *Coordinator) APIHistory() []llm.Exchange {
@@ -441,6 +496,10 @@ func cloneExchange(exchange llm.Exchange) llm.Exchange {
 
 func cloneResponse(response llm.Response) llm.Response {
 	clone := response
+	if response.Usage != nil {
+		usage := *response.Usage
+		clone.Usage = &usage
+	}
 	clone.RawChunks = append([]string(nil), response.RawChunks...)
 	clone.ToolCalls = append([]llm.ToolCallTrace(nil), response.ToolCalls...)
 	return clone
@@ -575,6 +634,8 @@ func (c *Coordinator) readStream(ctx context.Context, requestID uint64, stream l
 			return response, nil, err
 		}
 		if delta.Usage != nil {
+			usage := *delta.Usage
+			response.Usage = &usage
 			c.emit(Event{Kind: EventContext, RequestID: requestID, ContextUsed: delta.Usage.TotalTokens, ContextLimit: c.config.ContextLimit})
 		}
 		if delta.Content != "" {
@@ -652,7 +713,7 @@ func toolDefinitions(registry *tools.Registry) []llm.ToolDefinition {
 	return registry.Definitions()
 }
 
-func (c *Coordinator) complete(req request, response string, intermediate []llm.Message) {
+func (c *Coordinator) completeRun(req request, response string, intermediate []llm.Message, run *RunResult, startedAt time.Time) {
 	c.mu.Lock()
 	c.transcript = append(c.transcript,
 		llm.Message{Role: "user", Content: llm.StringContent(req.content)},
@@ -660,7 +721,7 @@ func (c *Coordinator) complete(req request, response string, intermediate []llm.
 	c.transcript = append(c.transcript, intermediate...)
 	c.transcript = append(c.transcript, llm.Message{Role: "assistant", Content: llm.StringContent(response)})
 	c.mu.Unlock()
-	c.emit(Event{Kind: EventCompleted, RequestID: req.id})
+	c.finishRun(req.id, run, startedAt, "succeeded", "")
 }
 
 func contentOrNil(value string) *string {
@@ -670,14 +731,53 @@ func contentOrNil(value string) *string {
 	return llm.StringContent(value)
 }
 
-func (c *Coordinator) fail(id uint64, err error, clearQueue bool) {
+func (c *Coordinator) currentModel() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.config.Model
+}
+
+func (c *Coordinator) failRun(id uint64, err error, clearQueue bool, run *RunResult, startedAt time.Time) {
 	if clearQueue {
 		c.mu.Lock()
 		c.queue = nil
 		c.mu.Unlock()
 		c.emit(Event{Kind: EventQueueCleared})
 	}
-	c.emit(Event{Kind: EventFailed, RequestID: id, Err: err})
+	c.finishRun(id, run, startedAt, "failed", err.Error())
+}
+
+func (c *Coordinator) finishRun(id uint64, run *RunResult, startedAt time.Time, status, errorText string) {
+	run.Duration = time.Since(startedAt)
+	run.Status = status
+	run.Error = errorText
+	kind := EventCompleted
+	if status == "failed" {
+		kind = EventFailed
+	} else if status == "cancelled" {
+		kind = EventCancelled
+	}
+	var err error
+	if errorText != "" {
+		err = errors.New(errorText)
+	}
+	c.emit(Event{Kind: kind, RequestID: id, Content: run.Answer, Err: err, Run: run})
+}
+
+func valueUsage(usage *llm.Usage) llm.Usage {
+	if usage == nil {
+		return llm.Usage{}
+	}
+	return *usage
+}
+
+func addUsage(total *llm.Usage, addition *llm.Usage) {
+	if addition == nil {
+		return
+	}
+	total.PromptTokens += addition.PromptTokens
+	total.CompletionTokens += addition.CompletionTokens
+	total.TotalTokens += addition.TotalTokens
 }
 
 func (c *Coordinator) emit(event Event) {
