@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mikepjb/spark/internal/llm"
 )
@@ -192,6 +193,85 @@ func TestRegistryGitTools(t *testing.T) {
 			result := registry.Execute(context.Background(), call(test.tool, test.args))
 			if !strings.Contains(result.Content, test.want) {
 				t.Fatalf("%s result = %q, want %q", test.name, result.Content, test.want)
+			}
+		})
+	}
+}
+
+func TestGitDiffRevisionRangeValidationAndPath(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not installed")
+	}
+	root := t.TempDir()
+	git := func(args ...string) {
+		t.Helper()
+		command := exec.Command("git", append([]string{"-C", root}, args...)...)
+		command.Env = append(os.Environ(), "GIT_AUTHOR_NAME=Spark Test", "GIT_AUTHOR_EMAIL=spark@example.invalid", "GIT_COMMITTER_NAME=Spark Test", "GIT_COMMITTER_EMAIL=spark@example.invalid")
+		if output, err := command.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, output)
+		}
+	}
+	git("init", "-q", "-b", "trunk")
+	if err := os.WriteFile(filepath.Join(root, "tracked.txt"), []byte("base\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "other.txt"), []byte("other base\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	git("add", ".")
+	git("commit", "-qm", "base")
+	git("branch", "base")
+	git("checkout", "-qb", "feature")
+	if err := os.WriteFile(filepath.Join(root, "tracked.txt"), []byte("base\nfeature\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "other.txt"), []byte("other base\nfeature\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	git("add", ".")
+	git("commit", "-qm", "feature")
+
+	registry, err := New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := registry.Execute(context.Background(), call("GitDiff", `{"revisionRange":"base...HEAD","path":"tracked.txt"}`))
+	if result.Failed || !strings.Contains(result.Content, "+feature") || strings.Contains(result.Content, "other.txt") {
+		t.Fatalf("revision range diff = %+v", result)
+	}
+	expired, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+	if result := registry.Execute(expired, call("GitDiff", `{"revisionRange":"base...HEAD"}`)); !result.Failed {
+		t.Fatalf("cancelled revision range diff = %+v, want failure", result)
+	}
+	large := strings.Repeat("x", maxLineLimit*maxLineWidth+1)
+	if err := os.WriteFile(filepath.Join(root, "large.txt"), []byte(large), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	git("add", "large.txt")
+	git("commit", "-qm", "large feature file")
+	result = registry.Execute(context.Background(), call("GitDiff", `{"revisionRange":"base...HEAD"}`))
+	if result.Failed || len(result.Content) > maxLineLimit*maxLineWidth+4096 {
+		suffix := result.Content
+		if len(suffix) > 100 {
+			suffix = suffix[len(suffix)-100:]
+		}
+		t.Fatalf("oversized revision range diff failed output bound: len=%d suffix=%q", len(result.Content), suffix)
+	}
+
+	for _, args := range []string{
+		`{"revisionRange":"-bad...HEAD"}`,
+		`{"revisionRange":"...HEAD"}`,
+		`{"revisionRange":"HEAD..."}`,
+		`{"revisionRange":"HEAD...HEAD...base"}`,
+		`{"revisionRange":"HEAD....base"}`,
+		`{"revisionRange":"missing...HEAD"}`,
+		`{"staged":true,"revisionRange":"base...HEAD"}`,
+	} {
+		t.Run(args, func(t *testing.T) {
+			result := registry.Execute(context.Background(), call("GitDiff", args))
+			if !result.Failed {
+				t.Fatalf("invalid revision range accepted: %+v", result)
 			}
 		})
 	}

@@ -24,6 +24,10 @@ running comfortably on a consumer laptop.
   cover the full request, including tool rounds. Configuration/startup failures
   exit `1`, invalid arguments or profile/skill selections exit `2`, and SIGINT
   exits `130`.
+- For branch reviews, name the base in the request (for example,
+  `spark -s review -p 'review vs main'`). The review skill can pass that base
+  as `GitDiff`'s `revisionRange`, for example `main...HEAD`. If the base is not
+  named and cannot be determined from the request, the skill should ask.
 - If you want to ask questions about a particular library, 2B is not big so
   MiniCPM5 is not likely to have it - instead cloning the library repo and
   asking spark inside the repo seems to generate great results (using HTMX
@@ -48,9 +52,6 @@ running comfortably on a consumer laptop.
 
 ## New features to be added
 
-- Remaining follow-up: Spark needs a revision-range Git tool to review committed feature branches
-  against main...HEAD or master...HEAD. Configure Spark’s skill_paths to agent/skills/spark or
-  copy this root into its .agents/skills.
 - Kagi API for WebSearch tool call
 - we should probably give the model some additional context like the time of
   day.. their present working directory? and check other harnesses to see what

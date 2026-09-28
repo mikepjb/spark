@@ -281,19 +281,40 @@ func (r *Registry) grep(ctx context.Context, args map[string]json.RawMessage) Re
 }
 
 func (r *Registry) gitDiff(ctx context.Context, args map[string]json.RawMessage) Result {
-	if err := validateKeys(args, "staged", "path"); err != nil {
+	if err := validateKeys(args, "staged", "revisionRange", "path"); err != nil {
 		return errorResult(err)
 	}
 	staged, err := boolArgument(args, "staged")
 	if err != nil {
 		return errorResult(err)
 	}
+	revisionRange, err := stringArgument(args, "revisionRange", false)
+	if err != nil {
+		return errorResult(err)
+	}
+	if staged && revisionRange != "" {
+		return errorResult(fmt.Errorf("staged cannot be combined with revisionRange"))
+	}
 	path, err := r.optionalGitPath(args)
 	if err != nil {
 		return errorResult(err)
 	}
 	command := []string{"diff", "--no-ext-diff"}
-	if staged {
+	if revisionRange != "" {
+		left, operator, right, err := splitRevisionRange(revisionRange)
+		if err != nil {
+			return errorResult(err)
+		}
+		leftOID, err := r.resolveCommit(ctx, left)
+		if err != nil {
+			return errorResult(fmt.Errorf("invalid revision range: %w", err))
+		}
+		rightOID, err := r.resolveCommit(ctx, right)
+		if err != nil {
+			return errorResult(fmt.Errorf("invalid revision range: %w", err))
+		}
+		command = append(command, leftOID+operator+rightOID)
+	} else if staged {
 		command = append(command, "--cached")
 	}
 	command = append(command, "--")
@@ -301,6 +322,46 @@ func (r *Registry) gitDiff(ctx context.Context, args map[string]json.RawMessage)
 		command = append(command, path)
 	}
 	return r.runGit(ctx, command, "Git diff")
+}
+
+func splitRevisionRange(value string) (left, operator, right string, err error) {
+	if len(value) > 512 {
+		return "", "", "", fmt.Errorf("revisionRange must be at most 512 characters")
+	}
+	if strings.HasPrefix(value, "-") {
+		return "", "", "", fmt.Errorf("revisionRange must not start with '-'")
+	}
+	if strings.Count(value, "...") == 1 && !strings.Contains(value, "....") {
+		parts := strings.SplitN(value, "...", 2)
+		left, right = parts[0], parts[1]
+		operator = "..."
+	} else if strings.Count(value, "..") == 1 {
+		parts := strings.SplitN(value, "..", 2)
+		left, right = parts[0], parts[1]
+		operator = ".."
+	} else {
+		return "", "", "", fmt.Errorf("revisionRange must contain exactly one '..' or '...' separator")
+	}
+	if left == "" || right == "" || strings.HasPrefix(left, "-") || strings.HasPrefix(right, "-") {
+		return "", "", "", fmt.Errorf("revisionRange must contain two revisions that do not start with '-'")
+	}
+	return left, operator, right, nil
+}
+
+func (r *Registry) resolveCommit(parent context.Context, revision string) (string, error) {
+	ctx, cancel := context.WithTimeout(parent, commandTimeout)
+	defer cancel()
+	command := exec.CommandContext(ctx, "git", "rev-parse", "--verify", "--end-of-options", revision+"^{commit}")
+	command.Dir = r.root
+	command.Env = append(os.Environ(), "GIT_OPTIONAL_LOCKS=0")
+	output, err := command.Output()
+	if err != nil {
+		if ctx.Err() != nil {
+			return "", fmt.Errorf("revision resolution timed out")
+		}
+		return "", fmt.Errorf("cannot resolve %q as a commit", revision)
+	}
+	return strings.TrimSpace(string(output)), nil
 }
 
 func (r *Registry) gitLog(ctx context.Context, args map[string]json.RawMessage) Result {

@@ -79,12 +79,16 @@ Delegation prompt:
 Make code review useful for both uncommitted work and committed feature
 branches. Extend the bounded Git tooling to support an explicitly validated
 revision range such as `main...HEAD`, without permitting arbitrary shell
-execution or option injection.
+execution or option injection. Since repositories use different base branch
+names, use the base named by the user instead of assuming `main`, `master`, or
+`develop`. If a branch review has no clear base, its skill should ask.
 
 Acceptance criteria:
 
 - Existing staged/unstaged diff calls remain compatible.
 - A caller can request a revision range and an optional workspace-relative path.
+- The review skill uses a base named by the user, or asks when the intended base
+  is unclear.
 - Revisions beginning with `-`, invalid argument combinations, oversized output,
   timeouts, and non-repositories are handled safely.
 - Tool definitions, implementation, tests, and user-facing documentation agree.
@@ -95,8 +99,9 @@ Delegation prompt:
 > Inspect Spark's Git tool definitions, validation, tests, and review-related
 > documentation. Implement Milestone 2 from `PLAN.md`: safe revision-range
 > support for GitDiff, including `main...HEAD`, while preserving existing
-> staged/unstaged behaviour and workspace boundaries. Add adversarial tests,
-> update documentation, run the relevant Go tests, and do not add shell access.
+> staged/unstaged behaviour and workspace boundaries. Use the user-specified
+> base in review requests and ask if unclear. Add adversarial tests, update
+> documentation, run the relevant Go tests, and do not add shell access.
 
 ## Milestone 3: Evaluation runner and result format
 
@@ -335,7 +340,7 @@ Delegation prompt:
 ## Completion order
 
 - [x] 1. Single-shot CLI
-- [ ] 2. Revision-range Git diff
+- [x] 2. Revision-range Git diff
 - [ ] 3. Evaluation runner and result format
 - [ ] 4. Core evaluation suite
 - [ ] 5. Baseline model comparison

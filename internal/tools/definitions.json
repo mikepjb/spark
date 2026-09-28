@@ -83,13 +83,18 @@
     "type": "function",
     "function": {
       "name": "GitDiff",
-      "description": "Show a bounded read-only Git diff for the workspace.",
+      "description": "Show a bounded read-only Git diff for the workspace. Use revisionRange to compare commits or branches; staged and revisionRange cannot be combined. Use a base named by the user, and ask if the intended base is unclear.",
       "parameters": {
         "type": "object",
         "properties": {
           "staged": {
             "type": "boolean",
             "description": "Show the staged diff instead of the working-tree diff."
+          },
+          "revisionRange": {
+            "type": "string",
+            "maxLength": 512,
+            "description": "Validated Git range with two commit revisions, such as main...HEAD or base..HEAD. Must not be combined with staged=true."
           },
           "path": {
             "type": "string",
