@@ -161,3 +161,37 @@ func TestPracticalSuiteIsRunnable(t *testing.T) {
 		}
 	}
 }
+
+func TestDefaultModelDiscoverySeparatesResumeKeys(t *testing.T) {
+	dir := t.TempDir()
+	modelID := "first.gguf"
+	previousDiscover := discoverActiveModel
+	discoverActiveModel = func(context.Context) (string, string, error) {
+		return "default", modelID, nil
+	}
+	defer func() { discoverActiveModel = previousDiscover }()
+	suitePath, output, spark := filepath.Join(dir, "suite.yaml"), filepath.Join(dir, "results.jsonl"), filepath.Join(dir, "spark")
+	writeFixture(t, suitePath, "version: 1\nid: tiny\ncases:\n  - id: one\n    prompt: hello\n", 0644)
+	writeFixture(t, spark, "#!/bin/sh\ncase \"$*\" in *--model*) exit 2 ;; esac\necho \"{\\\"schema_version\\\":1,\\\"selected_profile\\\":\\\"default\\\",\\\"resolved_model\\\":\\\"$MODEL_ID\\\",\\\"answer\\\":\\\"ok\\\",\\\"status\\\":\\\"succeeded\\\"}\"\n", 0755)
+	args := []string{"--suite", suitePath, "--spark", spark, "--output", output}
+	for _, id := range []string{"first.gguf", "second.gguf", "second.gguf"} {
+		modelID = id
+		t.Setenv("MODEL_ID", id)
+		if err := run(context.Background(), args, &strings.Builder{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	records := readRecords(t, output)
+	if len(records) != 2 || records[0].ResolvedModel != "first.gguf" || records[1].ResolvedModel != "second.gguf" || records[0].RunID == records[1].RunID {
+		t.Fatalf("default model records: %+v", records)
+	}
+	modelID = "third.gguf"
+	t.Setenv("MODEL_ID", "different.gguf")
+	if err := run(context.Background(), args, &strings.Builder{}); err == nil {
+		t.Fatal("accepted a model change during evaluation")
+	}
+	records = readRecords(t, output)
+	if len(records) != 3 || records[2].Outcome != "failed" || !strings.Contains(records[2].Error, "expected API model") {
+		t.Fatalf("model change record: %+v", records)
+	}
+}

@@ -149,5 +149,45 @@
         "additionalProperties": false
       }
     }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "Doc",
+      "description": "Look up offline language and package documentation using the installed doc script. Use for API signatures and version-specific local docs. Results are bounded; unavailable operations return an error. Python show and Python/Node members are excluded because they import package code.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": ["list", "members", "show", "search"],
+            "description": "List standard libraries, list members, show an entry, or search documentation."
+          },
+          "language": {
+            "type": "string",
+            "enum": ["go", "java", "node", "ts", "python"]
+          },
+          "entry": {
+            "type": "string",
+            "description": "Package, module, or class for members/show."
+          },
+          "symbol": {
+            "type": "string",
+            "description": "Optional symbol for show."
+          },
+          "pattern": {
+            "type": "string",
+            "description": "Regular expression for search."
+          },
+          "scope": {
+            "type": "string",
+            "enum": ["std", "project", "cache"],
+            "description": "Search scope; defaults to std. TypeScript search uses project. List supports std only."
+          }
+        },
+        "required": ["action", "language"],
+        "additionalProperties": false
+      }
+    }
   }
 ]

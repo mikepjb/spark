@@ -379,8 +379,8 @@ func TestCoordinatorExecutesToolCallsAndContinuesConversation(t *testing.T) {
 	waitForEvent(t, coordinator.Events(), EventCompleted, id)
 
 	request := client.request(1)
-	if len(request.Tools) != 7 {
-		t.Fatalf("tool definition count = %d, want 7", len(request.Tools))
+	if len(request.Tools) != len(registry.Definitions()) {
+		t.Fatalf("tool definition count = %d, want %d", len(request.Tools), len(registry.Definitions()))
 	}
 	firstRequest := client.request(0)
 	if firstRequest.Messages[0].Content == nil || !strings.Contains(*firstRequest.Messages[0].Content, "Tool calls remaining for this request: 8") {

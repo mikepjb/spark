@@ -19,6 +19,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/mikepjb/spark/internal/config"
+	"github.com/mikepjb/spark/internal/model"
 	"gopkg.in/yaml.v3"
 )
 
@@ -123,8 +125,8 @@ func parse(args []string, stderr io.Writer) (options, error) {
 	if err := f.Parse(args); err != nil {
 		return o, err
 	}
-	if f.NArg() != 0 || o.suitePath == "" || o.model == "" || o.runs < 1 || o.outputPath == "" || o.sparkPath == "" {
-		return o, fmt.Errorf("requires --suite, --model, --runs >= 1, and no positional arguments")
+	if f.NArg() != 0 || o.suitePath == "" || o.runs < 1 || o.outputPath == "" || o.sparkPath == "" {
+		return o, fmt.Errorf("requires --suite, --runs >= 1, and no positional arguments")
 	}
 	return o, nil
 }
@@ -196,6 +198,31 @@ func loadExisting(path string) (map[string]string, error) {
 	return completed, nil
 }
 
+var discoverActiveModel = func(ctx context.Context) (string, string, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return "", "", fmt.Errorf("load Spark config: %w", err)
+	}
+	manager, err := model.New(cfg)
+	if err != nil {
+		return "", "", fmt.Errorf("select active model: %w", err)
+	}
+	choice := manager.Current()
+	discoverer, ok := choice.Client.(interface {
+		DiscoverModel(context.Context) (string, error)
+	})
+	if !ok {
+		return "", "", fmt.Errorf("active model API does not support discovery")
+	}
+	discoveryCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	name, err := discoverer.DiscoverModel(discoveryCtx)
+	if err != nil {
+		return "", "", fmt.Errorf("discover active model from API: %w", err)
+	}
+	return choice.Name, name, nil
+}
+
 func run(ctx context.Context, args []string, stderr io.Writer) error {
 	o, err := parse(args, stderr)
 	if err != nil {
@@ -209,6 +236,16 @@ func run(ctx context.Context, args []string, stderr io.Writer) error {
 	if err := validateSuite(s); err != nil {
 		return err
 	}
+	// Without an explicit profile, use Spark's active profile and the model
+	// advertised by its API. The discovered ID also keeps resume keys separate
+	// when the server is restarted with another model.
+	var discoveredModel string
+	if o.model == "" {
+		o.model, discoveredModel, err = discoverActiveModel(ctx)
+		if err != nil {
+			return err
+		}
+	}
 	var metadata modelMetadata
 	var manifestHash string
 	if o.manifestPath != "" {
@@ -221,9 +258,14 @@ func run(ctx context.Context, args []string, stderr io.Writer) error {
 			return fmt.Errorf("manifest requires version 1")
 		}
 		var ok bool
-		metadata, ok = m.Models[o.model]
+		if discoveredModel != "" {
+			metadata, ok = m.Models[discoveredModel]
+		}
 		if !ok {
-			return fmt.Errorf("model %q is absent from manifest", o.model)
+			metadata, ok = m.Models[o.model]
+		}
+		if !ok {
+			return fmt.Errorf("model %q (API model %q) is absent from manifest", o.model, discoveredModel)
 		}
 		manifestHash = digest(manifestData)
 	}
@@ -270,14 +312,18 @@ func run(ctx context.Context, args []string, stderr io.Writer) error {
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
-			id := digest([]byte(fmt.Sprintf("%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%d", s.ID, suiteHash, c.ID, workspace, o.model, manifestHash, repetition)))
+			identity := o.model
+			if discoveredModel != "" {
+				identity += "\x00" + discoveredModel
+			}
+			id := digest([]byte(fmt.Sprintf("%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%d", s.ID, suiteHash, c.ID, workspace, identity, manifestHash, repetition)))
 			if outcome, exists := completed[id]; exists {
 				if outcome != "succeeded" {
 					failures++
 				}
 				continue
 			}
-			entry := execute(ctx, spark, s.ID, suiteHash, c, workspace, o.model, metadata, manifestHash, repetition, id)
+			entry := execute(ctx, spark, s.ID, suiteHash, c, workspace, o.model, discoveredModel, metadata, manifestHash, repetition, id)
 			encoded, err := json.Marshal(entry)
 			if err != nil {
 				return err
@@ -303,9 +349,12 @@ func run(ctx context.Context, args []string, stderr io.Writer) error {
 	return nil
 }
 
-func execute(ctx context.Context, spark, suiteID, suiteHash string, c evalCase, workspace, profile string, metadata modelMetadata, manifestHash string, repetition int, id string) record {
+func execute(ctx context.Context, spark, suiteID, suiteHash string, c evalCase, workspace, profile, expectedModel string, metadata modelMetadata, manifestHash string, repetition int, id string) record {
 	entry := record{SchemaVersion: schemaVersion, EvaluatorVersion: evaluatorVersion, RunID: id, SuiteID: suiteID, SuiteSHA256: suiteHash, CaseID: c.ID, Prompt: c.Prompt, Skill: c.Skill, Workspace: workspace, Repetition: repetition, ModelProfile: profile, Metadata: metadata, ManifestSHA256: manifestHash, Outcome: "failed", Usage: json.RawMessage(`{}`), ToolCalls: json.RawMessage(`[]`)}
-	args := []string{"--format", "json", "--model", profile}
+	args := []string{"--format", "json"}
+	if expectedModel == "" {
+		args = append(args, "--model", profile)
+	}
 	if c.Skill != "" {
 		args = append(args, "--skill", c.Skill)
 	}
@@ -353,6 +402,10 @@ func execute(ctx context.Context, spark, suiteID, suiteHash string, c evalCase, 
 		if result.SelectedProfile != profile {
 			entry.Outcome = "failed"
 			entry.Error = fmt.Sprintf("CLI selected profile %q, expected %q", result.SelectedProfile, profile)
+		}
+		if expectedModel != "" && result.ResolvedModel != expectedModel {
+			entry.Outcome = "failed"
+			entry.Error = fmt.Sprintf("CLI resolved model %q, expected API model %q", result.ResolvedModel, expectedModel)
 		}
 		if err != nil && entry.Outcome == "succeeded" {
 			entry.Outcome = "failed"

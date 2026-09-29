@@ -1,6 +1,4 @@
-.PHONY: dev install lint test config eval \
-	eval-qwen35-0.8b eval-qwen35-2b eval-qwen35-4b eval-qwen35-9b \
-	eval-minicpm5-2b eval-gemma4-e2b eval-gemma4-e4b eval-granite41-3b
+.PHONY: dev install lint test config eval
 
 EVAL_SUITE ?= evaluation/suites/practical.yaml
 EVAL_MANIFEST ?= evaluation/manifest.yaml
@@ -21,24 +19,11 @@ test: lint
 	go test -v ./...
 
 eval:
-	@test -n "$(EVAL_MODEL)" || { echo "Set EVAL_MODEL to a configured Spark profile" >&2; exit 1; }
 	@mkdir -p "$(dir $(EVAL_SPARK))"
 	go build -o "$(EVAL_SPARK)" ./cmd/spark
 	go run ./cmd/spark-eval --suite "$(EVAL_SUITE)" $(if $(wildcard $(EVAL_MANIFEST)),--manifest "$(EVAL_MANIFEST)") \
-		--model "$(EVAL_MODEL)" --runs "$(EVAL_RUNS)" --spark "$(EVAL_SPARK)" \
+		$(if $(EVAL_MODEL),--model "$(EVAL_MODEL)") --runs "$(EVAL_RUNS)" --spark "$(EVAL_SPARK)" \
 		--output "$(EVAL_OUTPUT)"
-
-eval-qwen35-0.8b: EVAL_MODEL = qwen35-0.8b
-eval-qwen35-2b: EVAL_MODEL = qwen35-2b
-eval-qwen35-4b: EVAL_MODEL = qwen35-4b
-eval-qwen35-9b: EVAL_MODEL = qwen35-9b
-eval-minicpm5-2b: EVAL_MODEL = minicpm5-2b
-eval-gemma4-e2b: EVAL_MODEL = gemma4-e2b
-eval-gemma4-e4b: EVAL_MODEL = gemma4-e4b
-eval-granite41-3b: EVAL_MODEL = granite41-3b
-
-eval-qwen35-0.8b eval-qwen35-2b eval-qwen35-4b eval-qwen35-9b \
-eval-minicpm5-2b eval-gemma4-e2b eval-gemma4-e4b eval-granite41-3b: eval
 
 config:
 	@if [ -z "$(HOME)" ]; then \

@@ -28,6 +28,13 @@ running comfortably on a consumer laptop.
   `spark -s review -p 'review vs main'`). The review skill can pass that base
   as `GitDiff`'s `revisionRange`, for example `main...HEAD`. If the base is not
   named and cannot be determined from the request, the skill should ask.
+- When `doc` is on `PATH`, Spark offers a `Doc` tool for bounded offline
+  language and package lookup. It supports standard-library listing, safe
+  member lookup, documentation display, and source search, with project/cache
+  search where the script supports it. Python documentation display and
+  Python/Node member lookup are excluded because those script commands import
+  package code. The tool uses the workspace as its working directory, stays
+  offline for Go modules, and limits output to 16 KiB.
 - If you want to ask questions about a particular library, 2B is not big so
   MiniCPM5 is not likely to have it - instead cloning the library repo and
   asking spark inside the repo seems to generate great results (using HTMX
@@ -35,18 +42,17 @@ running comfortably on a consumer laptop.
 
 ## Development evaluations
 
-Build Spark, then run the development-only evaluator against a configured model
-profile and an already running endpoint:
+Run the development-only evaluator against the model currently loaded at
+Spark's configured endpoint:
 
 ```sh
-go build -o /tmp/spark ./cmd/spark
-go run ./cmd/spark-eval --suite evaluation/suites/practical.yaml \
-  --model qwen35-4b --runs 3 --spark /tmp/spark
+make eval
 ```
 
 For reproducible comparisons, copy `evaluation/manifest.example.yaml` to
 `evaluation/manifest.yaml` and fill in the model, inference, and hardware
-details. The Make targets use this manifest when it exists; without it, those
+details. Key each entry by the API model ID or Spark's active profile. The eval
+target uses this manifest when it exists; without it, those
 metadata fields are empty. Each suite case runs through
 Spark's JSON CLI; the runner does not manage model servers. Cases can specify
 `prompt`, `skill`, and a `workspace` relative to the suite file.
@@ -55,13 +61,11 @@ Results append to the Git-ignored `evaluation/results/runs.jsonl` by default.
 They include the answer, outcome, timing, tokens, model rounds, tool calls, and
 manifest metadata. Failed and interrupted cases are recorded. Re-running the
 same command skips recorded runs; use a larger `--runs` value or a new output
-file for fresh attempts. Run once per model profile.
+file for fresh attempts. Runs for different API model IDs have separate resume keys.
 
-For repeated runs, use `make eval-qwen35-4b` (or `make eval EVAL_MODEL=your-profile`).
-Targets also exist for Qwen 3.5 0.8B/2B/9B, MiniCPM5 2B, Gemma 4 E2B/E4B,
-and Granite 4.1 3B. Each target requires a matching profile in `~/.sparkrc`;
-start that profile's endpoint first. Override `EVAL_SUITE`, `EVAL_RUNS`, or
-`EVAL_OUTPUT` as needed.
+Use `make eval` after starting the model endpoint. Override `EVAL_SUITE`,
+`EVAL_RUNS`, or `EVAL_OUTPUT` as needed. `EVAL_MODEL=your-profile` remains
+available when you need to select a non-default Spark profile explicitly.
 The default `practical.yaml` suite covers project comprehension, Go and Python
 library usage, and a seeded code review. Its manual answer guide is in
 `evaluation/suites/practical-notes.md`; automatic scoring is not available yet.

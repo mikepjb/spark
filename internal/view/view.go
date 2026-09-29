@@ -755,7 +755,7 @@ func isExploratoryTool(message chatMessage) bool {
 	}
 
 	switch toolName {
-	case "Read", "Glob", "Grep", "GitStatus", "GitDiff", "GitLog", "GitShow":
+	case "Read", "Glob", "Grep", "Doc", "GitStatus", "GitDiff", "GitLog", "GitShow":
 		return true
 	default:
 		return false

@@ -30,8 +30,12 @@ func TestRegistryDefinitionsAndWorkspaceTools(t *testing.T) {
 		t.Fatal(err)
 	}
 	definitions := registry.Definitions()
-	if len(definitions) != 7 {
-		t.Fatalf("definition count = %d, want 7", len(definitions))
+	wantDefinitions := 7
+	if registry.docPath != "" {
+		wantDefinitions++
+	}
+	if len(definitions) != wantDefinitions {
+		t.Fatalf("definition count = %d, want %d", len(definitions), wantDefinitions)
 	}
 
 	read := registry.Execute(context.Background(), call("Read", `{"filePath":"notes.txt","offset":2}`))

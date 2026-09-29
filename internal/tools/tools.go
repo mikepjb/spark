@@ -40,7 +40,8 @@ type Result struct {
 }
 
 type Registry struct {
-	root string
+	root    string
+	docPath string
 }
 
 func New(root string) (*Registry, error) {
@@ -59,7 +60,8 @@ func New(root string) (*Registry, error) {
 	if !info.IsDir() {
 		return nil, fmt.Errorf("workspace root is not a directory: %s", resolved)
 	}
-	return &Registry{root: resolved}, nil
+	docPath, _ := exec.LookPath("doc")
+	return &Registry{root: resolved, docPath: docPath}, nil
 }
 
 func (r *Registry) Definitions() []llm.ToolDefinition {
@@ -70,6 +72,9 @@ func (r *Registry) Definitions() []llm.ToolDefinition {
 	var definitions []llm.ToolDefinition
 	if err := json.Unmarshal(data, &definitions); err != nil {
 		panic(fmt.Sprintf("decode embedded tool definitions: %v", err))
+	}
+	if r.docPath == "" {
+		definitions = definitions[:len(definitions)-1]
 	}
 	return definitions
 }
@@ -90,6 +95,8 @@ func (r *Registry) Execute(ctx context.Context, call llm.ToolCall) Result {
 		return r.glob(ctx, args)
 	case "Grep":
 		return r.grep(ctx, args)
+	case "Doc":
+		return r.doc(ctx, args)
 	case "GitStatus":
 		return r.git(ctx, args, "status", "--short", "--branch")
 	case "GitDiff":
